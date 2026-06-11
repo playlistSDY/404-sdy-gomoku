@@ -1,0 +1,12 @@
+services:
+  sdy-gomoku:
+    build:
+      context: .
+    container_name: sdy-gomoku
+    environment:
+      CORS_ORIGIN: "*"
+      HOST: 0.0.0.0
+      PORT: 5404
+    ports:
+      - "5404:5404"
+    restart: unless-stopped

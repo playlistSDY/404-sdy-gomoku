@@ -1,0 +1,286 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #f3f0e9;
+  color: #111412;
+  --origin-x: 50vw;
+  --origin-y: 50vh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  min-width: 960px;
+  min-height: 680px;
+  background:
+    linear-gradient(90deg, rgba(17, 20, 18, 0.04) 1px, transparent 1px),
+    linear-gradient(rgba(17, 20, 18, 0.035) 1px, transparent 1px),
+    #f3f0e9;
+  background-size: 32px 32px;
+}
+
+button {
+  font: inherit;
+}
+
+#app {
+  position: relative;
+  isolation: isolate;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #eee7da;
+  opacity: 0;
+  clip-path: circle(0 at var(--origin-x) var(--origin-y));
+  cursor: crosshair;
+  transition:
+    clip-path 940ms cubic-bezier(0.2, 0.82, 0.18, 1),
+    opacity 260ms ease;
+}
+
+.hero {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  transition:
+    opacity 620ms ease,
+    transform 900ms cubic-bezier(0.2, 0.82, 0.18, 1),
+    filter 900ms ease;
+}
+
+.hero h1 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: #111412;
+  font-size: 156px;
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: 0;
+}
+
+.hero h1 > span {
+  display: inline-block;
+  transition:
+    opacity 520ms ease,
+    transform 720ms cubic-bezier(0.2, 0.82, 0.18, 1);
+}
+
+.hero p {
+  margin: 0;
+  color: rgba(17, 20, 18, 0.54);
+  font-size: 15px;
+  font-weight: 850;
+  letter-spacing: 0.18em;
+  transition:
+    opacity 420ms ease,
+    transform 620ms cubic-bezier(0.2, 0.82, 0.18, 1);
+}
+
+#start-orb {
+  width: 0.76em;
+  height: 0.76em;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.08) 24%, transparent 40%),
+    #111412;
+  color: transparent;
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1;
+  box-shadow:
+    0 18px 40px rgba(17, 20, 18, 0.16),
+    inset -10px -12px 18px rgba(0, 0, 0, 0.22);
+  transform: translateY(-0.012em);
+  transition:
+    box-shadow 260ms ease,
+    opacity 420ms ease,
+    transform 860ms cubic-bezier(0.16, 0.86, 0.18, 1);
+  will-change: opacity, transform;
+}
+
+#start-orb:hover {
+  transform: translateY(-0.012em) scale(0.9);
+}
+
+#start-orb:focus-visible {
+  outline: 5px solid rgba(29, 111, 88, 0.28);
+  outline-offset: 8px;
+}
+
+.micro-status,
+.result-panel {
+  position: fixed;
+}
+
+.micro-status,
+.result-panel {
+  left: 50%;
+  z-index: 6;
+  transform: translateX(-50%);
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+.micro-status {
+  bottom: 32px;
+  color: rgba(17, 20, 18, 0.72);
+  transition:
+    opacity 180ms ease,
+    visibility 180ms ease,
+    transform 180ms ease;
+}
+
+.result-panel {
+  top: 34px;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  color: #111412;
+  transition:
+    opacity 200ms ease,
+    visibility 200ms ease,
+    transform 200ms ease;
+}
+
+.result-panel p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.result-panel button {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  background: transparent;
+  color: rgba(17, 20, 18, 0.72);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+.result-panel button:focus-visible {
+  outline: 3px solid rgba(29, 111, 88, 0.28);
+  outline-offset: 4px;
+}
+
+.retry-icon {
+  width: 14px;
+  height: 14px;
+  position: relative;
+  display: inline-block;
+  border: 2px solid rgba(17, 20, 18, 0.66);
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+.retry-icon::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -2px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid rgba(17, 20, 18, 0.66);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transform: rotate(28deg);
+}
+
+.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.micro-status.hidden {
+  transform: translate(-50%, 8px);
+}
+
+.result-panel.hidden {
+  transform: translate(-50%, -8px);
+}
+
+#app.is-starting .hero h1 > span,
+#app.is-started .hero h1 > span {
+  opacity: 0;
+  transform: translateY(-16px) scale(0.98);
+}
+
+#app.is-starting .hero p,
+#app.is-started .hero p {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+#app.is-starting #start-orb {
+  opacity: 0.62;
+  box-shadow:
+    0 24px 44px rgba(17, 20, 18, 0.2),
+    inset -10px -12px 18px rgba(0, 0, 0, 0.22);
+  transform: translateY(42px) scale(0.42);
+}
+
+#app.is-started #start-orb {
+  opacity: 0;
+  transform: translateY(48px) scale(0.34);
+}
+
+#app.is-started #scene {
+  opacity: 1;
+  clip-path: circle(150vmax at var(--origin-x) var(--origin-y));
+}
+
+#app.is-started .hero {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  filter: none;
+}
+
+#app.is-thinking #scene {
+  cursor: wait;
+}
+
+@media (max-width: 1080px) {
+  body {
+    min-width: 760px;
+  }
+
+  .hero h1 {
+    font-size: 118px;
+  }
+}
