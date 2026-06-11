@@ -272,29 +272,14 @@ def has_four(pattern: str) -> bool:
     return False
 
 
-def count_moves_creating(pattern: str, predicate) -> int:
-    count = 0
-    for index, char in enumerate(pattern):
-        if char != "_":
-            continue
-        next_pattern = f"{pattern[:index]}O{pattern[index + 1:]}"
-        if predicate(next_pattern):
-            count += 1
-    return count
-
-
 def has_open_three(pattern: str) -> bool:
-    if count_moves_creating(pattern, has_open_four) >= 2:
-        return True
-    return any(shape in pattern for shape in ("_OO_O_", "_O_OO_"))
+    return any(shape in pattern for shape in ("_OOO_", "_OO_O_", "_O_OO_"))
 
 
 def has_broken_three(pattern: str) -> bool:
-    return count_moves_creating(pattern, has_four) >= 1
-
-
-def has_open_two(pattern: str) -> bool:
-    return count_moves_creating(pattern, has_open_three) >= 2
+    return not has_open_three(pattern) and any(
+        shape in pattern for shape in ("_OO_O", "OO_O_", "_O_OO", "O_OO_")
+    )
 
 
 def classify_line_pattern(pattern: str) -> str:
@@ -308,8 +293,6 @@ def classify_line_pattern(pattern: str) -> str:
         return "open_three"
     if has_broken_three(pattern):
         return "broken_three"
-    if has_open_two(pattern):
-        return "open_two"
     return "quiet"
 
 
@@ -318,7 +301,6 @@ def threat_summary(board: list[list[int]], row: int, col: int, player: int) -> d
     fours = 0
     open_threes = 0
     broken_threes = 0
-    open_twos = 0
     direct_five = False
 
     for dr, dc in DIRECTIONS:
@@ -334,8 +316,6 @@ def threat_summary(board: list[list[int]], row: int, col: int, player: int) -> d
             open_threes += 1
         elif shape == "broken_three":
             broken_threes += 1
-        elif shape == "open_two":
-            open_twos += 1
 
     double_four = open_fours + fours >= 2
     four_three = open_fours + fours >= 1 and open_threes + broken_threes >= 1
@@ -358,7 +338,6 @@ def threat_summary(board: list[list[int]], row: int, col: int, player: int) -> d
         + fours * 10_000_000
         + open_threes * 500_000
         + broken_threes * 100_000
-        + open_twos * 10_000
     )
 
     return {
@@ -371,7 +350,6 @@ def threat_summary(board: list[list[int]], row: int, col: int, player: int) -> d
         "fours": fours,
         "openFours": open_fours,
         "openThrees": open_threes,
-        "openTwos": open_twos,
         "rank": rank,
     }
 
@@ -381,9 +359,16 @@ def score_move(board: list[list[int]], row: int, col: int, player: int) -> float
         return -math.inf
 
     threat = threat_summary(board, row, col, player)
+    base = 0
+    for dr, dc in DIRECTIONS:
+        run = directional_run(board, row, col, player, dr, dc)
+        base += score_pattern(run["length"], run["openEnds"])
+        base += score_broken_pattern(board, row, col, player, dr, dc)
+
     center = (BOARD_SIZE - 1) / 2
     center_distance = abs(row - center) + abs(col - center)
-    return threat["rank"] + max(0, 20 - center_distance) * 9
+    center_bonus = max(0, 20 - center_distance) * 9
+    return threat["rank"] + base * 0.35 + center_bonus
 
 
 def winning_move(board: list[list[int]], candidate: dict, player: int) -> bool:
@@ -444,41 +429,6 @@ def ordered_moves(board: list[list[int]], player: int, limit: int = BRANCH_MOVE_
     opponent = other_player(player)
     moves = [candidate_score(board, candidate, player, opponent) for candidate in get_candidates(board, 2)]
     return sorted(moves, key=lambda item: (-item["score"], -item["defense"], -item["attack"]))[:limit]
-
-
-def find_threat_space_move(board: list[list[int]], ai_player: int) -> dict | None:
-    human_player = other_player(ai_player)
-    candidates = get_candidates(board, 2)
-    ai_threats = [
-        item
-        for item in (candidate_score(board, candidate, ai_player, human_player) for candidate in candidates)
-        if item["threat"]["forcing"]
-    ]
-    ai_threats.sort(key=lambda item: (-item["priority"], -item["threat"]["rank"], -item["score"]))
-
-    human_threats = [
-        item
-        for item in (candidate_score(board, candidate, human_player, ai_player) for candidate in candidates)
-        if item["threat"]["forcing"]
-    ]
-    human_threats.sort(key=lambda item: (-item["priority"], -item["threat"]["rank"], -item["score"]))
-
-    ai_best = ai_threats[0] if ai_threats else None
-    human_best = human_threats[0] if human_threats else None
-
-    if human_best and (
-        not ai_best
-        or human_best["priority"] > ai_best["priority"]
-        or (
-            human_best["priority"] == ai_best["priority"]
-            and human_best["threat"]["rank"] >= ai_best["threat"]["rank"] * 0.88
-        )
-    ):
-        return {**human_best, "reason": "contain"}
-    if ai_best:
-        return {**ai_best, "reason": "threat"}
-
-    return None
 
 
 def pick_tactical(scored_moves: list[dict], predicate, reason: str) -> dict | None:
