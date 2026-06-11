@@ -14,6 +14,14 @@ SEARCH_TIME_SECONDS = 1.1
 ROOT_MOVE_LIMIT = 22
 BRANCH_MOVE_LIMIT = 12
 LEAF_MOVE_LIMIT = 18
+VCF_DEPTH = 10
+VCT_DEPTH = 8
+FORCING_SEARCH_TIME_SECONDS = 0.55
+VCF_MOVE_LIMIT = 10
+VCT_MOVE_LIMIT = 8
+VCT_DEFENSE_LIMIT = 5
+VCF_BLOCK_CANDIDATE_LIMIT = 12
+VCT_BLOCK_CANDIDATE_LIMIT = 10
 
 
 def create_board() -> list[list[int]]:
@@ -49,6 +57,43 @@ def place_move(board: list[list[int]], row: int, col: int, player: int) -> None:
     board[row][col] = player
 
 
+def board_key(board: list[list[int]]) -> tuple[tuple[int, ...], ...]:
+    return tuple(tuple(row) for row in board)
+
+
+def board_is_full(board: list[list[int]]) -> bool:
+    return all(cell != EMPTY for row in board for cell in row)
+
+
+def check_win_from(board: list[list[int]], row: int, col: int, player: int) -> dict | None:
+    if not is_inside(row, col) or board[row][col] != player:
+        return None
+
+    for dr, dc in DIRECTIONS:
+        line = [{"row": row, "col": col}]
+
+        r = row - dr
+        c = col - dc
+        while is_inside(r, c) and board[r][c] == player:
+            line.insert(0, {"row": r, "col": c})
+            r -= dr
+            c -= dc
+
+        r = row + dr
+        c = col + dc
+        while is_inside(r, c) and board[r][c] == player:
+            line.append({"row": r, "col": c})
+            r += dr
+            c += dc
+
+        if len(line) >= 5:
+            move_index = next(index for index, item in enumerate(line) if item["row"] == row and item["col"] == col)
+            start = max(0, min(move_index - 4, len(line) - 5))
+            return {"winner": player, "line": line[start : start + 5]}
+
+    return None
+
+
 def get_winner(board: list[list[int]]) -> dict | None:
     for row in range(BOARD_SIZE):
         for col in range(BOARD_SIZE):
@@ -56,25 +101,11 @@ def get_winner(board: list[list[int]]) -> dict | None:
             if player == EMPTY:
                 continue
 
-            for dr, dc in DIRECTIONS:
-                prev_row = row - dr
-                prev_col = col - dc
-                if is_inside(prev_row, prev_col) and board[prev_row][prev_col] == player:
-                    continue
+            result = check_win_from(board, row, col, player)
+            if result:
+                return result
 
-                line = []
-                next_row = row
-                next_col = col
-                while is_inside(next_row, next_col) and board[next_row][next_col] == player:
-                    line.append({"row": next_row, "col": next_col})
-                    next_row += dr
-                    next_col += dc
-
-                if len(line) >= 5:
-                    return {"winner": player, "line": line[:5]}
-
-    full = all(cell != EMPTY for row in board for cell in row)
-    return {"winner": 3, "line": []} if full else None
+    return {"winner": 3, "line": []} if board_is_full(board) else None
 
 
 def get_candidates(board: list[list[int]], radius: int = 2) -> list[dict]:
@@ -204,40 +235,6 @@ def score_broken_pattern(board: list[list[int]], row: int, col: int, player: int
     return score
 
 
-def count_line_windows(
-    board: list[list[int]],
-    row: int,
-    col: int,
-    player: int,
-    dr: int,
-    dc: int,
-    target_stones: int,
-    target_empties: int,
-) -> int:
-    count = 0
-    for offset in range(-4, 1):
-        stones = 0
-        empties = 0
-        valid = True
-        for index in range(5):
-            r = row + (offset + index) * dr
-            c = col + (offset + index) * dc
-            if not is_inside(r, c):
-                valid = False
-                break
-            cell = player if r == row and c == col else board[r][c]
-            if cell == player:
-                stones += 1
-            elif cell == EMPTY:
-                empties += 1
-            else:
-                valid = False
-                break
-        if valid and stones == target_stones and empties == target_empties:
-            count += 1
-    return count
-
-
 def get_line_pattern(board: list[list[int]], row: int, col: int, player: int, dr: int, dc: int) -> str:
     chars = []
     for offset in range(-4, 5):
@@ -272,13 +269,28 @@ def has_four(pattern: str) -> bool:
     return False
 
 
+def count_pattern_moves_creating(pattern: str, detector) -> int:
+    count = 0
+    for index, char in enumerate(pattern):
+        if char != "_":
+            continue
+        next_pattern = pattern[:index] + "O" + pattern[index + 1 :]
+        if detector(next_pattern):
+            count += 1
+    return count
+
+
 def has_open_three(pattern: str) -> bool:
-    return any(shape in pattern for shape in ("_OOO_", "_OO_O_", "_O_OO_"))
+    if any(shape in pattern for shape in ("_OOO_", "_OO_O_", "_O_OO_")):
+        return True
+    return count_pattern_moves_creating(pattern, has_open_four) >= 2
 
 
 def has_broken_three(pattern: str) -> bool:
-    return not has_open_three(pattern) and any(
-        shape in pattern for shape in ("_OO_O", "OO_O_", "_O_OO", "O_OO_")
+    if has_open_three(pattern):
+        return False
+    return any(shape in pattern for shape in ("_OO_O", "OO_O_", "_O_OO", "O_OO_")) and (
+        count_pattern_moves_creating(pattern, has_four) >= 1
     )
 
 
@@ -378,9 +390,9 @@ def winning_move(board: list[list[int]], candidate: dict, player: int) -> bool:
         return False
 
     board[row][col] = player
-    result = get_winner(board)
+    result = check_win_from(board, row, col, player)
     board[row][col] = EMPTY
-    return bool(result and result["winner"] == player)
+    return bool(result)
 
 
 def immediate_winning_moves(board: list[list[int]], player: int, candidates: list[dict] | None = None) -> list[dict]:
@@ -425,9 +437,9 @@ def candidate_score(board: list[list[int]], candidate: dict, player: int, defend
     }
 
 
-def ordered_moves(board: list[list[int]], player: int, limit: int = BRANCH_MOVE_LIMIT) -> list[dict]:
+def ordered_moves(board: list[list[int]], player: int, limit: int = BRANCH_MOVE_LIMIT, radius: int = 2) -> list[dict]:
     opponent = other_player(player)
-    moves = [candidate_score(board, candidate, player, opponent) for candidate in get_candidates(board, 2)]
+    moves = [candidate_score(board, candidate, player, opponent) for candidate in get_candidates(board, radius)]
     return sorted(moves, key=lambda item: (-item["score"], -item["defense"], -item["attack"]))[:limit]
 
 
@@ -441,7 +453,7 @@ def pick_tactical(scored_moves: list[dict], predicate, reason: str) -> dict | No
 
 def find_tactical_move(board: list[list[int]], ai_player: int) -> dict | None:
     human_player = other_player(ai_player)
-    candidates = get_candidates(board, 2)
+    candidates = get_candidates(board, 3)
     ai_moves = [candidate_score(board, candidate, ai_player, human_player) for candidate in candidates]
     human_moves = [candidate_score(board, candidate, human_player, ai_player) for candidate in candidates]
 
@@ -478,6 +490,383 @@ def find_tactical_move(board: list[list[int]], ai_player: int) -> dict | None:
         return block_double_three
 
     return None
+
+
+def with_reason(move: dict, reason: str) -> dict:
+    return {"row": move["row"], "col": move["col"], "reason": reason}
+
+
+def unique_limited_moves(moves: list[dict], limit: int) -> list[dict]:
+    seen: set[tuple[int, int]] = set()
+    unique = []
+    for move in moves:
+        key = (move["row"], move["col"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(move)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+def is_vcf_threat(threat: dict) -> bool:
+    return threat["directFive"] or threat["openFours"] > 0 or threat["fours"] > 0
+
+
+def is_vct_threat(threat: dict) -> bool:
+    return (
+        is_vcf_threat(threat)
+        or threat["doubleFour"]
+        or threat["fourThree"]
+        or threat["doubleThree"]
+        or threat["openThrees"] > 0
+    )
+
+
+def forcing_moves(board: list[list[int]], player: int, limit: int, vct: bool = False) -> list[dict]:
+    opponent = other_player(player)
+    moves = []
+    for candidate in get_candidates(board, 3):
+        threat = threat_summary(board, candidate["row"], candidate["col"], player)
+        if not (is_vct_threat(threat) if vct else is_vcf_threat(threat)):
+            continue
+        scored = candidate_score(board, candidate, player, opponent)
+        moves.append(scored)
+
+    return sorted(
+        moves,
+        key=lambda item: (
+            -item["priority"],
+            -item["threat"]["rank"],
+            -item["score"],
+            -item["defense"],
+        ),
+    )[:limit]
+
+
+def forced_four_responses(board: list[list[int]], attacker: int) -> list[dict] | None:
+    defender = other_player(attacker)
+    if immediate_winning_moves(board, defender):
+        return None
+
+    attack_wins = immediate_winning_moves(board, attacker)
+    if len(attack_wins) >= 2:
+        return []
+    if len(attack_wins) == 1:
+        return attack_wins
+    return None
+
+
+def vcf_can_win(
+    board: list[list[int]],
+    attacker: int,
+    depth: int,
+    deadline: float,
+    table: dict,
+) -> bool:
+    if time.monotonic() > deadline:
+        return False
+    if immediate_winning_moves(board, attacker):
+        return True
+    if depth <= 0:
+        return False
+
+    key = ("vcf", board_key(board), attacker, depth)
+    if key in table:
+        return table[key]
+
+    defender = other_player(attacker)
+    for move in forcing_moves(board, attacker, VCF_MOVE_LIMIT, vct=False):
+        if time.monotonic() > deadline:
+            break
+
+        row = move["row"]
+        col = move["col"]
+        board[row][col] = attacker
+        success = False
+
+        if check_win_from(board, row, col, attacker):
+            success = True
+        else:
+            responses = forced_four_responses(board, attacker)
+            if responses == []:
+                success = True
+            elif responses is not None and depth >= 2:
+                response = responses[0]
+                board[response["row"]][response["col"]] = defender
+                if not check_win_from(board, response["row"], response["col"], defender):
+                    success = vcf_can_win(board, attacker, depth - 2, deadline, table)
+                board[response["row"]][response["col"]] = EMPTY
+
+        board[row][col] = EMPTY
+        if success:
+            table[key] = True
+            return True
+
+    table[key] = False
+    return False
+
+
+def vcf_move_succeeds(
+    board: list[list[int]],
+    move: dict,
+    attacker: int,
+    depth: int,
+    deadline: float,
+    table: dict,
+) -> bool:
+    if time.monotonic() > deadline:
+        return False
+
+    defender = other_player(attacker)
+    row = move["row"]
+    col = move["col"]
+    board[row][col] = attacker
+    success = False
+
+    if check_win_from(board, row, col, attacker):
+        success = True
+    else:
+        responses = forced_four_responses(board, attacker)
+        if responses == []:
+            success = True
+        elif responses is not None and depth >= 2:
+            response = responses[0]
+            board[response["row"]][response["col"]] = defender
+            if not check_win_from(board, response["row"], response["col"], defender):
+                success = vcf_can_win(board, attacker, depth - 2, deadline, table)
+            board[response["row"]][response["col"]] = EMPTY
+
+    board[row][col] = EMPTY
+    return success
+
+
+def find_vcf_move(
+    board: list[list[int]],
+    attacker: int,
+    deadline: float | None = None,
+    max_depth: int = VCF_DEPTH,
+    reason: str = "vcf",
+) -> dict | None:
+    deadline = deadline if deadline is not None else time.monotonic() + FORCING_SEARCH_TIME_SECONDS
+    if time.monotonic() > deadline:
+        return None
+    table: dict = {}
+    for move in forcing_moves(board, attacker, VCF_MOVE_LIMIT, vct=False):
+        if vcf_move_succeeds(board, move, attacker, max_depth, deadline, table):
+            return with_reason(move, reason)
+        if time.monotonic() > deadline:
+            break
+    return None
+
+
+def defensive_sequence_candidates(
+    board: list[list[int]],
+    defender: int,
+    attacker: int,
+    seed: dict | None,
+    limit: int,
+) -> list[dict]:
+    scored = [candidate_score(board, candidate, defender, attacker) for candidate in get_candidates(board, 3)]
+    scored.sort(
+        key=lambda item: (
+            -item["defenseThreat"]["rank"],
+            -item["defense"],
+            -item["attack"],
+            -item["score"],
+        )
+    )
+    moves = ([seed] if seed else []) + scored
+    return unique_limited_moves([move for move in moves if move and board[move["row"]][move["col"]] == EMPTY], limit)
+
+
+def block_vcf_move(board: list[list[int]], ai_player: int, deadline: float) -> dict | None:
+    if time.monotonic() > deadline:
+        return None
+    attacker = other_player(ai_player)
+    threat = find_vcf_move(board, attacker, deadline, max_depth=VCF_DEPTH - 2, reason="vcf")
+    if not threat:
+        return None
+
+    for move in defensive_sequence_candidates(board, ai_player, attacker, threat, VCF_BLOCK_CANDIDATE_LIMIT):
+        if time.monotonic() > deadline:
+            break
+        board[move["row"]][move["col"]] = ai_player
+        still_losing = find_vcf_move(board, attacker, deadline, max_depth=VCF_DEPTH - 2, reason="vcf")
+        board[move["row"]][move["col"]] = EMPTY
+        if not still_losing:
+            return with_reason(move, "block-vcf")
+
+    return with_reason(threat, "block-vcf")
+
+
+def vct_defense_moves(board: list[list[int]], attacker: int) -> list[dict] | None:
+    defender = other_player(attacker)
+    if immediate_winning_moves(board, defender):
+        return None
+
+    attack_wins = immediate_winning_moves(board, attacker)
+    if len(attack_wins) >= 2:
+        return []
+    if len(attack_wins) == 1:
+        return attack_wins
+
+    scored = [candidate_score(board, candidate, defender, attacker) for candidate in get_candidates(board, 3)]
+    scored.sort(
+        key=lambda item: (
+            -item["defenseThreat"]["rank"],
+            -item["defenseThreat"]["openFours"],
+            -item["defenseThreat"]["openThrees"],
+            -item["defense"],
+            -item["attack"],
+        )
+    )
+    forcing_defenses = [
+        move
+        for move in scored
+        if move["defenseThreat"]["fours"] > 0
+        or move["defenseThreat"]["openThrees"] > 0
+        or move["defenseThreat"]["doubleThree"]
+        or move["defenseThreat"]["fourThree"]
+    ]
+    return unique_limited_moves(forcing_defenses or scored, VCT_DEFENSE_LIMIT)
+
+
+def vct_can_win(
+    board: list[list[int]],
+    attacker: int,
+    depth: int,
+    deadline: float,
+    table: dict,
+) -> bool:
+    if time.monotonic() > deadline:
+        return False
+    if immediate_winning_moves(board, attacker):
+        return True
+    if depth <= 0:
+        return False
+
+    key = ("vct", board_key(board), attacker, depth)
+    if key in table:
+        return table[key]
+
+    defender = other_player(attacker)
+    for move in forcing_moves(board, attacker, VCT_MOVE_LIMIT, vct=True):
+        if time.monotonic() > deadline:
+            break
+
+        row = move["row"]
+        col = move["col"]
+        board[row][col] = attacker
+        success = False
+
+        if check_win_from(board, row, col, attacker):
+            success = True
+        else:
+            responses = vct_defense_moves(board, attacker)
+            if responses == []:
+                success = True
+            elif responses is not None and depth >= 2:
+                success = True
+                for response in responses:
+                    if time.monotonic() > deadline:
+                        success = False
+                        break
+                    board[response["row"]][response["col"]] = defender
+                    defender_wins = check_win_from(board, response["row"], response["col"], defender)
+                    branch_wins = not defender_wins and vct_can_win(board, attacker, depth - 2, deadline, table)
+                    board[response["row"]][response["col"]] = EMPTY
+                    if not branch_wins:
+                        success = False
+                        break
+
+        board[row][col] = EMPTY
+        if success:
+            table[key] = True
+            return True
+
+    table[key] = False
+    return False
+
+
+def vct_move_succeeds(
+    board: list[list[int]],
+    move: dict,
+    attacker: int,
+    depth: int,
+    deadline: float,
+    table: dict,
+) -> bool:
+    if time.monotonic() > deadline:
+        return False
+
+    defender = other_player(attacker)
+    row = move["row"]
+    col = move["col"]
+    board[row][col] = attacker
+    success = False
+
+    if check_win_from(board, row, col, attacker):
+        success = True
+    else:
+        responses = vct_defense_moves(board, attacker)
+        if responses == []:
+            success = True
+        elif responses is not None and depth >= 2:
+            success = True
+            for response in responses:
+                if time.monotonic() > deadline:
+                    success = False
+                    break
+                board[response["row"]][response["col"]] = defender
+                defender_wins = check_win_from(board, response["row"], response["col"], defender)
+                branch_wins = not defender_wins and vct_can_win(board, attacker, depth - 2, deadline, table)
+                board[response["row"]][response["col"]] = EMPTY
+                if not branch_wins:
+                    success = False
+                    break
+
+    board[row][col] = EMPTY
+    return success
+
+
+def find_vct_move(
+    board: list[list[int]],
+    attacker: int,
+    deadline: float,
+    max_depth: int = VCT_DEPTH,
+    reason: str = "vct",
+) -> dict | None:
+    if time.monotonic() > deadline:
+        return None
+    table: dict = {}
+    for move in forcing_moves(board, attacker, VCT_MOVE_LIMIT, vct=True):
+        if vct_move_succeeds(board, move, attacker, max_depth, deadline, table):
+            return with_reason(move, reason)
+        if time.monotonic() > deadline:
+            break
+    return None
+
+
+def block_vct_move(board: list[list[int]], ai_player: int, deadline: float) -> dict | None:
+    if time.monotonic() > deadline:
+        return None
+    attacker = other_player(ai_player)
+    threat = find_vct_move(board, attacker, deadline, max_depth=VCT_DEPTH - 2, reason="vct")
+    if not threat:
+        return None
+
+    for move in defensive_sequence_candidates(board, ai_player, attacker, threat, VCT_BLOCK_CANDIDATE_LIMIT):
+        if time.monotonic() > deadline:
+            break
+        board[move["row"]][move["col"]] = ai_player
+        still_losing = find_vct_move(board, attacker, deadline, max_depth=VCT_DEPTH - 2, reason="vct")
+        board[move["row"]][move["col"]] = EMPTY
+        if not still_losing:
+            return with_reason(move, "block-vct")
+
+    return with_reason(threat, "block-vct")
 
 
 def best_threat_rank(board: list[list[int]], player: int) -> int:
@@ -530,35 +919,67 @@ def minimax(
     current_player: int,
     ai_player: int,
     deadline: float,
+    last_move: dict | None = None,
+    transposition: dict | None = None,
 ) -> dict:
     if time.monotonic() > deadline:
         return {"score": evaluate_board(board, ai_player), "timedOut": True}
 
-    result = get_winner(board)
-    if result and result["winner"] == ai_player:
-        return {"score": WIN_SCORE + depth, "timedOut": False}
-    if result and result["winner"] == other_player(ai_player):
-        return {"score": -WIN_SCORE - depth, "timedOut": False}
-    if result and result["winner"] == 3:
+    if transposition is None:
+        transposition = {}
+
+    if last_move:
+        result = check_win_from(board, last_move["row"], last_move["col"], last_move["player"])
+    else:
+        result = get_winner(board)
+
+    if result:
+        if result["winner"] == ai_player:
+            return {"score": WIN_SCORE + depth, "timedOut": False}
+        if result["winner"] == other_player(ai_player):
+            return {"score": -WIN_SCORE - depth, "timedOut": False}
+    if board_is_full(board):
         return {"score": 0, "timedOut": False}
+
+    key = (board_key(board), current_player, ai_player, depth)
+    cached = transposition.get(key)
+    if cached is not None:
+        return {"score": cached, "timedOut": False}
+
     winning_moves = immediate_winning_moves(board, current_player)
     if winning_moves:
         score = WIN_SCORE + depth if current_player == ai_player else -WIN_SCORE - depth
+        transposition[key] = score
         return {"score": score, "timedOut": False}
     if depth == 0:
-        return {"score": evaluate_board(board, ai_player), "timedOut": False}
+        score = evaluate_board(board, ai_player)
+        transposition[key] = score
+        return {"score": score, "timedOut": False}
 
     maximizing = current_player == ai_player
     moves = ordered_moves(board, current_player, BRANCH_MOVE_LIMIT if depth >= 2 else LEAF_MOVE_LIMIT)
     if not moves:
-        return {"score": evaluate_board(board, ai_player), "timedOut": False}
+        score = evaluate_board(board, ai_player)
+        transposition[key] = score
+        return {"score": score, "timedOut": False}
 
     best_score = -math.inf if maximizing else math.inf
     timed_out = False
+    cutoff = False
 
     for move in moves:
         board[move["row"]][move["col"]] = current_player
-        child = minimax(board, depth - 1, alpha, beta, other_player(current_player), ai_player, deadline)
+        child = minimax(
+            board,
+            depth - 1,
+            alpha,
+            beta,
+            other_player(current_player),
+            ai_player,
+            deadline,
+            {"row": move["row"], "col": move["col"], "player": current_player},
+            transposition,
+        )
         board[move["row"]][move["col"]] = EMPTY
         timed_out = timed_out or child.get("timedOut", False)
 
@@ -569,15 +990,22 @@ def minimax(
             best_score = min(best_score, child["score"])
             beta = min(beta, best_score)
 
-        if beta <= alpha or timed_out:
+        if beta <= alpha:
+            cutoff = True
+            break
+        if timed_out:
             break
 
+    if not timed_out and not cutoff:
+        transposition[key] = best_score
     return {"score": best_score, "timedOut": timed_out}
 
 
 def choose_alpha_beta_move(board: list[list[int]], ai_player: int) -> dict | None:
     deadline = time.monotonic() + SEARCH_TIME_SECONDS
-    root_moves = ordered_moves(board, ai_player, ROOT_MOVE_LIMIT)
+    human_player = other_player(ai_player)
+    root_radius = 3 if max(best_threat_rank(board, ai_player), best_threat_rank(board, human_player)) >= 500_000 else 2
+    root_moves = ordered_moves(board, ai_player, ROOT_MOVE_LIMIT, radius=root_radius)
     if root_moves:
         for move in root_moves:
             move["safetyPenalty"] = opponent_safety_penalty(board, move, ai_player)
@@ -587,6 +1015,7 @@ def choose_alpha_beta_move(board: list[list[int]], ai_player: int) -> dict | Non
 
     best_move = root_moves[0] if root_moves else None
     best_score = -math.inf
+    transposition: dict = {}
 
     for depth in (2, 3, 4):
         depth_best = best_move
@@ -599,7 +1028,17 @@ def choose_alpha_beta_move(board: list[list[int]], ai_player: int) -> dict | Non
                 break
 
             board[move["row"]][move["col"]] = ai_player
-            result = minimax(board, depth - 1, -math.inf, math.inf, other_player(ai_player), ai_player, deadline)
+            result = minimax(
+                board,
+                depth - 1,
+                -math.inf,
+                math.inf,
+                human_player,
+                ai_player,
+                deadline,
+                {"row": move["row"], "col": move["col"], "player": ai_player},
+                transposition,
+            )
             board[move["row"]][move["col"]] = EMPTY
             score = result["score"] - move.get("safetyPenalty", 0)
 
@@ -647,6 +1086,23 @@ def choose_server_move(board: list[list[int]], ai_player: int = WHITE) -> dict |
     tactical_move = find_tactical_move(board, ai_player)
     if tactical_move:
         return tactical_move
+
+    forcing_deadline = time.monotonic() + FORCING_SEARCH_TIME_SECONDS
+    vcf_move = find_vcf_move(board, ai_player, forcing_deadline)
+    if vcf_move:
+        return vcf_move
+
+    vcf_block = block_vcf_move(board, ai_player, forcing_deadline)
+    if vcf_block:
+        return vcf_block
+
+    vct_move = find_vct_move(board, ai_player, forcing_deadline)
+    if vct_move:
+        return vct_move
+
+    vct_block = block_vct_move(board, ai_player, forcing_deadline)
+    if vct_block:
+        return vct_block
 
     searched_move = choose_alpha_beta_move(board, ai_player)
     if searched_move:

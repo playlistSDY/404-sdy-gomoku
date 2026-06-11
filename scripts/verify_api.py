@@ -8,6 +8,8 @@ if str(ROOT) not in sys.path:
 from app.gomoku_engine import (
     BLACK,
     WHITE,
+    check_win_from,
+    classify_line_pattern,
     choose_server_move,
     create_board,
     get_winner,
@@ -100,5 +102,11 @@ win_board = create_board()
 for col in range(5):
     place_move(win_board, 4, col, BLACK)
 assert_true(get_winner(win_board)["winner"] == BLACK, "Winner detection failed.")
+assert_true(check_win_from(win_board, 4, 2, BLACK)["winner"] == BLACK, "Last-move winner detection failed.")
+
+assert_true(classify_line_pattern("BOOO_") == "quiet", "Blocked three was over-classified.")
+assert_true(classify_line_pattern("_OOOB") == "quiet", "Blocked three was over-classified.")
+assert_true(classify_line_pattern("_OO_O") == "broken_three", "Open jump three was not detected.")
+assert_true(classify_line_pattern("_OOO_") == "open_three", "Open three was not detected.")
 
 print("Gomoku engine checks passed.")
