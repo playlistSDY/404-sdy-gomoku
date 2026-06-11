@@ -10,8 +10,8 @@ const BOARD_SPAN = GAP * (SIZE - 1);
 const BOARD_SIZE = BOARD_SPAN + 1.15;
 const STONE_Y = 0.22;
 const STONE_DROP_Y = 1.08;
+const COMPUTER_MOVE_MIN_MS = 650;
 const START_REVEAL_DELAY_MS = 290;
-const START_FIRST_STONE_AFTER_REVEAL_MS = 85;
 const START_INPUT_DELAY_MS = 710;
 const moduleBaseUrl = new URL('.', import.meta.url);
 const apiBaseUrl = new URL(window.GOMOKU_404_API_BASE ?? moduleBaseUrl.origin);
@@ -592,7 +592,6 @@ async function startGame(event) {
   app.classList.add('is-started');
   setStatus('');
 
-  await wait(START_FIRST_STONE_AFTER_REVEAL_MS);
   updateUi(session);
 
   await wait(START_INPUT_DELAY_MS);
@@ -634,6 +633,7 @@ async function playMove(row, col) {
   const previousBoard = state.board.map((line) => [...line]);
   const previousHistory = sessionHistory.map((move) => ({ ...move }));
   const previousLastMove = state.lastMove ? { ...state.lastMove } : null;
+  const hasServerMove = sessionHistory.some((move) => move.source === 'server');
   const localMove = {
     player: state.humanPlayer,
     row,
@@ -656,7 +656,12 @@ async function playMove(row, col) {
   setStatus('서버가 두는 중', true);
 
   try {
+    const startedAt = performance.now();
     const session = await api('/api/move', { sessionId: state.sessionId, row, col });
+    const elapsed = performance.now() - startedAt;
+    if (hasServerMove && elapsed < COMPUTER_MOVE_MIN_MS) {
+      await wait(COMPUTER_MOVE_MIN_MS - elapsed);
+    }
     state.thinking = false;
     app.classList.remove('is-thinking');
     updateUi(session);
