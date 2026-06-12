@@ -49,6 +49,10 @@ async function sample(page) {
       lit,
       resultHidden: document.querySelector('#result-panel').classList.contains('hidden'),
       retryText: document.querySelector('#retry-button').textContent.trim(),
+      selectedDifficulty: document.querySelector('[data-option="difficulty"].is-selected')?.dataset.value ?? '',
+      selectedForbiddenRule: document.querySelector('[data-option="forbiddenRule"].is-selected')?.dataset.value ?? '',
+      settingsButtonOpacity: getComputedStyle(document.querySelector('#settings-button')).opacity,
+      settingsPanelHidden: document.querySelector('#settings-panel').classList.contains('hidden'),
       status: document.querySelector('#micro-status').textContent,
       statusHidden: document.querySelector('#micro-status').classList.contains('hidden'),
     };
@@ -87,6 +91,15 @@ await page.waitForTimeout(1400);
 const started = await sample(page);
 await page.screenshot({ path: screenshotPath('started'), fullPage: false });
 
+await page.click('#settings-button');
+await page.click('[data-option="difficulty"][data-value="hard"]');
+await page.click('[data-option="forbiddenRule"][data-value="renju"]');
+await page.waitForTimeout(400);
+const optionsOpen = await sample(page);
+await page.screenshot({ path: screenshotPath('options'), fullPage: false });
+await page.keyboard.press('Escape');
+await page.waitForTimeout(120);
+
 const center = {
   x: Math.round(page.viewportSize().width / 2),
   y: Math.round(page.viewportSize().height / 2),
@@ -99,7 +112,7 @@ await page.screenshot({ path: screenshotPath('after-click'), fullPage: false });
 const randomSession = await apiState(page);
 await browser.close();
 
-const result = { afterClick, errors, initial, randomSession, screenshots, started };
+const result = { afterClick, errors, initial, optionsOpen, randomSession, screenshots, started };
 console.log(JSON.stringify(result, null, 2));
 
 if (
@@ -109,6 +122,11 @@ if (
   started.heroVisible > 0.2 ||
   started.retryText !== '다시하기' ||
   !started.resultHidden ||
+  Number(initial.settingsButtonOpacity) > 0.1 ||
+  Number(started.settingsButtonOpacity) < 0.8 ||
+  optionsOpen.settingsPanelHidden ||
+  optionsOpen.selectedDifficulty !== 'hard' ||
+  optionsOpen.selectedForbiddenRule !== 'renju' ||
   randomSession.humanPlayer !== 1 && randomSession.humanPlayer !== 2 ||
   randomSession.serverPlayer !== 1 && randomSession.serverPlayer !== 2 ||
   randomSession.humanPlayer === randomSession.serverPlayer ||

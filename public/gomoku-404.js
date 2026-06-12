@@ -13,6 +13,10 @@ const STONE_DROP_Y = 1.08;
 const COMPUTER_MOVE_MIN_MS = 950;
 const START_REVEAL_DELAY_MS = 290;
 const START_INPUT_DELAY_MS = 710;
+const DEFAULT_OPTIONS = {
+  difficulty: 'expert',
+  forbiddenRule: 'none',
+};
 const moduleBaseUrl = new URL('.', import.meta.url);
 const apiBaseUrl = new URL(window.GOMOKU_404_API_BASE ?? moduleBaseUrl.origin);
 
@@ -113,6 +117,26 @@ app.innerHTML = `
     <p>NOT FOUND</p>
   </main>
   <div class="micro-status hidden" id="micro-status"></div>
+  <button class="settings-button" id="settings-button" type="button" aria-label="옵션 열기" aria-expanded="false">
+    <span aria-hidden="true">⚙</span>
+  </button>
+  <section class="settings-panel hidden" id="settings-panel" aria-label="옵션">
+    <div class="settings-row">
+      <span class="settings-label">난이도</span>
+      <div class="segmented-control" role="group" aria-label="난이도">
+        <button type="button" data-option="difficulty" data-value="normal">보통</button>
+        <button type="button" data-option="difficulty" data-value="hard">강함</button>
+        <button type="button" data-option="difficulty" data-value="expert">전문가</button>
+      </div>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">금수</span>
+      <div class="segmented-control" role="group" aria-label="금수">
+        <button type="button" data-option="forbiddenRule" data-value="none">끄기</button>
+        <button type="button" data-option="forbiddenRule" data-value="renju">렌주</button>
+      </div>
+    </div>
+  </section>
   <div class="result-panel hidden" id="result-panel">
     <p id="result-message">승리</p>
     <button id="retry-button" type="button">
@@ -126,6 +150,8 @@ const canvas = document.querySelector('#scene');
 const hero = document.querySelector('#hero');
 const startOrb = document.querySelector('#start-orb');
 const microStatus = document.querySelector('#micro-status');
+const settingsButton = document.querySelector('#settings-button');
+const settingsPanel = document.querySelector('#settings-panel');
 const resultPanel = document.querySelector('#result-panel');
 const resultMessage = document.querySelector('#result-message');
 const retryButton = document.querySelector('#retry-button');
@@ -141,6 +167,7 @@ const state = {
   started: false,
   status: 'idle',
   thinking: false,
+  options: { ...DEFAULT_OPTIONS },
   winLine: [],
   winner: null,
 };
@@ -159,6 +186,7 @@ let hoverMarker;
 let lastMoveMarker;
 let winLineMesh;
 let introProgress = 0;
+let optionRequestVersion = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xeee7da);
@@ -352,6 +380,57 @@ function wait(ms) {
   });
 }
 
+function optionsPayload(extra = {}) {
+  return {
+    difficulty: state.options.difficulty,
+    forbiddenRule: state.options.forbiddenRule,
+    ...extra,
+  };
+}
+
+function updateSettingsControls() {
+  for (const button of settingsPanel.querySelectorAll('[data-option]')) {
+    const selected = state.options[button.dataset.option] === button.dataset.value;
+    button.classList.toggle('is-selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  }
+}
+
+function closeSettingsPanel() {
+  settingsPanel.classList.add('hidden');
+  settingsButton.setAttribute('aria-expanded', 'false');
+}
+
+function toggleSettingsPanel() {
+  if (!state.started) return;
+  const willOpen = settingsPanel.classList.contains('hidden');
+  settingsPanel.classList.toggle('hidden', !willOpen);
+  settingsButton.setAttribute('aria-expanded', String(willOpen));
+}
+
+async function applyOption(name, value) {
+  if (state.options[name] === value) return;
+  state.options = { ...state.options, [name]: value };
+  updateSettingsControls();
+
+  if (!state.started || !state.sessionId) return;
+
+  optionRequestVersion += 1;
+  const requestVersion = optionRequestVersion;
+  try {
+    const session = await api('/api/options', {
+      sessionId: state.sessionId,
+      ...optionsPayload(),
+    });
+    if (requestVersion !== optionRequestVersion) return;
+    updateUi(session);
+    setStatus('옵션 적용됨');
+  } catch (error) {
+    if (requestVersion !== optionRequestVersion) return;
+    setStatus(error.message);
+  }
+}
+
 function setStatus(text, persist = false) {
   clearTimeout(statusTimer);
   microStatus.textContent = text;
@@ -533,9 +612,11 @@ function updateUi(session) {
   state.sessionId = session.id;
   state.status = session.status;
   state.winner = session.winner;
+  state.options = { ...state.options, ...(session.options ?? {}) };
   state.winLine = session.winLine ?? [];
   state.lastMove = session.history.at(-1) ?? null;
 
+  updateSettingsControls();
   syncStones(session.board, session.history);
   updateHoverMarker();
   updateLastMoveMarker();
@@ -582,7 +663,7 @@ async function startGame(event) {
   setRevealOrigin(originX, originY);
 
   app.classList.add('is-starting');
-  const session = await api('/api/new', { humanPlayer: 'white' });
+  const session = await api('/api/new', { humanPlayer: 'white', ...optionsPayload() });
   state.humanPlayer = session.humanPlayer;
   app.classList.toggle('human-white', state.humanPlayer === WHITE);
   app.classList.toggle('human-black', state.humanPlayer === BLACK);
@@ -606,7 +687,7 @@ async function restartMatch() {
   clearBoardScene();
   setStatus('');
 
-  const session = await api('/api/new', { humanPlayer: 'white' });
+  const session = await api('/api/new', { humanPlayer: 'white', ...optionsPayload() });
   state.humanPlayer = session.humanPlayer;
   state.started = true;
   app.classList.add('is-starting', 'is-started', 'human-white');
@@ -727,11 +808,30 @@ canvas.addEventListener('click', (event) => {
 
 startOrb.addEventListener('click', startGame);
 retryButton.addEventListener('click', restartMatch);
+settingsButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleSettingsPanel();
+});
+settingsPanel.addEventListener('click', (event) => {
+  event.stopPropagation();
+  const button = event.target.closest('[data-option]');
+  if (!button) return;
+  applyOption(button.dataset.option, button.dataset.value);
+});
 hero.addEventListener('click', (event) => {
   if (event.target === startOrb) return;
   startGame(event);
 });
+document.addEventListener('click', (event) => {
+  if (!settingsPanel.contains(event.target) && !settingsButton.contains(event.target)) {
+    closeSettingsPanel();
+  }
+});
 window.addEventListener('keydown', (event) => {
+  if (event.code === 'Escape') {
+    closeSettingsPanel();
+    return;
+  }
   if (event.code === 'KeyO' || event.code === 'Digit0' || event.code === 'Numpad0' || event.code === 'Space') {
     startGame();
   }
@@ -739,6 +839,7 @@ window.addEventListener('keydown', (event) => {
 window.addEventListener('resize', resize);
 
 createBoardScene();
+updateSettingsControls();
 resize();
 
 const clock = new THREE.Clock();

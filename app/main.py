@@ -11,10 +11,15 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 
 from .gomoku_engine import (
     BLACK,
+    DEFAULT_DIFFICULTY,
+    DEFAULT_FORBIDDEN_RULE,
     WHITE,
     choose_server_move,
     create_board,
     get_winner,
+    is_forbidden_move,
+    normalize_difficulty,
+    normalize_forbidden_rule,
     other_player,
     place_move,
     serialize_move,
@@ -38,8 +43,34 @@ app.add_middleware(
 )
 
 
+def normalize_session_options(options: dict[str, Any] | None = None) -> dict[str, str]:
+    options = options or {}
+    nested = options.get("options") if isinstance(options.get("options"), dict) else {}
+    return {
+        "difficulty": normalize_difficulty(options.get("difficulty") or nested.get("difficulty") or DEFAULT_DIFFICULTY),
+        "forbiddenRule": normalize_forbidden_rule(
+            options.get("forbiddenRule") or nested.get("forbiddenRule") or DEFAULT_FORBIDDEN_RULE
+        ),
+    }
+
+
+def update_session_options(session: dict[str, Any], options: dict[str, Any]) -> None:
+    current = session.get("options", normalize_session_options())
+    merged = {
+        "difficulty": options.get("difficulty", current["difficulty"]),
+        "forbiddenRule": options.get("forbiddenRule", current["forbiddenRule"]),
+    }
+    session["options"] = normalize_session_options(merged)
+
+
 def make_server_move(session: dict[str, Any]) -> None:
-    server_move = choose_server_move(session["board"], session["serverPlayer"])
+    options = session.get("options", normalize_session_options())
+    server_move = choose_server_move(
+        session["board"],
+        session["serverPlayer"],
+        difficulty=options["difficulty"],
+        forbidden_rule=options["forbiddenRule"],
+    )
     if not server_move:
         return
 
@@ -59,6 +90,7 @@ def make_server_move(session: dict[str, Any]) -> None:
 
 def create_session(options: dict[str, Any] | None = None) -> dict[str, Any]:
     options = options or {}
+    session_options = normalize_session_options(options)
     human_player = BLACK
     if options.get("humanPlayer") in (WHITE, "white"):
         human_player = WHITE
@@ -71,6 +103,7 @@ def create_session(options: dict[str, Any] | None = None) -> dict[str, Any]:
         "currentPlayer": BLACK,
         "history": [],
         "humanPlayer": human_player,
+        "options": session_options,
         "serverPlayer": other_player(human_player),
         "status": "playing",
         "winner": None,
@@ -93,6 +126,7 @@ def public_session(session: dict[str, Any]) -> dict[str, Any]:
         "history": session["history"],
         "humanPlayer": session["humanPlayer"],
         "id": session["id"],
+        "options": session.get("options", normalize_session_options()),
         "serverPlayer": session["serverPlayer"],
         "status": session["status"],
         "winner": session["winner"],
@@ -127,6 +161,19 @@ async def new_session(request: Request) -> JSONResponse:
     return JSONResponse(public_session(create_session(body)))
 
 
+@app.post("/api/options")
+async def options_update(request: Request) -> JSONResponse:
+    body = await read_json_body(request)
+    session = sessions.get(body.get("sessionId"))
+    if not session:
+        return json_error(404, "Session not found.")
+    if session["status"] != "playing":
+        return json_error(409, "Match is already finished.")
+
+    update_session_options(session, body)
+    return JSONResponse(public_session(session))
+
+
 @app.post("/api/move")
 async def move(request: Request) -> JSONResponse:
     try:
@@ -141,6 +188,10 @@ async def move(request: Request) -> JSONResponse:
 
         row = int(body.get("row"))
         col = int(body.get("col"))
+        options = session.get("options", normalize_session_options())
+        if is_forbidden_move(session["board"], row, col, session["humanPlayer"], options["forbiddenRule"]):
+            return json_error(400, "금수입니다.")
+
         place_move(session["board"], row, col, session["humanPlayer"])
         session["history"].append(
             {

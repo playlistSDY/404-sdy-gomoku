@@ -13,6 +13,7 @@ from app.gomoku_engine import (
     choose_server_move,
     create_board,
     get_winner,
+    is_forbidden_move,
     place_move,
 )
 
@@ -97,6 +98,16 @@ block_double_three_board = create_board()
 for row, col in ((7, 5), (7, 6), (5, 7), (6, 7)):
     place_move(block_double_three_board, row, col, BLACK)
 assert_move(choose_server_move(block_double_three_board, WHITE), 7, 7, "AI did not block a double-three threat.")
+
+forbidden_board = create_board()
+for row, col in ((7, 5), (7, 6), (5, 7), (6, 7)):
+    place_move(forbidden_board, row, col, BLACK)
+assert_true(is_forbidden_move(forbidden_board, 7, 7, BLACK, "renju"), "Double-three forbidden move failed.")
+forbidden_ai_move = choose_server_move(forbidden_board, BLACK, forbidden_rule="renju")
+assert_true(
+    forbidden_ai_move["row"] != 7 or forbidden_ai_move["col"] != 7,
+    "AI selected a forbidden black double-three.",
+)
 
 win_board = create_board()
 for col in range(5):
