@@ -6,6 +6,7 @@ const chromePath =
 
 const errors = [];
 const screenshots = [];
+const expectedSettingsIconUrl = new URL('/asset/setting.png', url).href;
 
 function screenshotPath(name) {
   const path = `/private/tmp/gomoku-404-${name}.png`;
@@ -51,8 +52,12 @@ async function sample(page) {
       retryText: document.querySelector('#retry-button').textContent.trim(),
       selectedDifficulty: document.querySelector('[data-option="difficulty"].is-selected')?.dataset.value ?? '',
       selectedForbiddenRule: document.querySelector('[data-option="forbiddenRule"].is-selected')?.dataset.value ?? '',
+      settingsButtonBackground: getComputedStyle(document.querySelector('#settings-button')).backgroundColor,
+      settingsButtonBorderWidth: getComputedStyle(document.querySelector('#settings-button')).borderTopWidth,
       settingsButtonOpacity: getComputedStyle(document.querySelector('#settings-button')).opacity,
+      settingsButtonTransform: getComputedStyle(document.querySelector('#settings-button')).transform,
       settingsIconLoaded: document.querySelector('#settings-button img')?.naturalWidth > 0,
+      settingsIconSrc: document.querySelector('#settings-button img')?.src ?? '',
       settingsPanelHidden: document.querySelector('#settings-panel').classList.contains('hidden'),
       status: document.querySelector('#micro-status').textContent,
       statusHidden: document.querySelector('#micro-status').classList.contains('hidden'),
@@ -127,8 +132,12 @@ if (
   started.selectedForbiddenRule !== 'none' ||
   Number(initial.settingsButtonOpacity) > 0.1 ||
   Number(started.settingsButtonOpacity) < 0.8 ||
+  started.settingsButtonBackground !== 'rgba(0, 0, 0, 0)' ||
+  started.settingsButtonBorderWidth !== '0px' ||
   !started.settingsIconLoaded ||
+  started.settingsIconSrc !== expectedSettingsIconUrl ||
   optionsOpen.settingsPanelHidden ||
+  optionsOpen.settingsButtonTransform !== 'none' ||
   optionsOpen.selectedDifficulty !== 'hard' ||
   optionsOpen.selectedForbiddenRule !== 'renju' ||
   randomSession.options?.forbiddenRule !== 'none' ||

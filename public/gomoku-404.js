@@ -19,6 +19,7 @@ const DEFAULT_OPTIONS = {
 };
 const moduleBaseUrl = new URL('.', import.meta.url);
 const apiBaseUrl = new URL(window.GOMOKU_404_API_BASE ?? moduleBaseUrl.origin);
+const settingsIconUrl = new URL('/asset/setting.png', apiBaseUrl).href;
 
 class SimpleOrbitControls {
   constructor(camera, domElement) {
@@ -118,7 +119,7 @@ app.innerHTML = `
   </main>
   <div class="micro-status hidden" id="micro-status"></div>
   <button class="settings-button" id="settings-button" type="button" aria-label="옵션 열기" aria-expanded="false">
-    <img src="/asset/setting.png" alt="" aria-hidden="true" />
+    <img src="${settingsIconUrl}" alt="" aria-hidden="true" />
   </button>
   <section class="settings-panel hidden" id="settings-panel" aria-label="옵션">
     <div class="settings-row">

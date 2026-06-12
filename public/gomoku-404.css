@@ -206,21 +206,15 @@ button {
   height: 42px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(17, 20, 18, 0.16);
-  border-radius: 50%;
-  background: rgba(243, 240, 233, 0.72);
+  border: 0;
+  background: transparent;
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  box-shadow:
-    0 12px 26px rgba(17, 20, 18, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  box-shadow: none;
   transition:
-    background 180ms ease,
-    border-color 180ms ease,
     color 180ms ease,
-    opacity 200ms ease,
-    transform 200ms ease;
+    opacity 200ms ease;
 }
 
 .settings-button img {
@@ -228,16 +222,12 @@ button {
   height: 22px;
   display: block;
   opacity: 0.74;
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
+  transition: opacity 180ms ease;
 }
 
 .settings-button:hover,
 .settings-button[aria-expanded="true"] {
-  border-color: rgba(29, 111, 88, 0.34);
-  background: rgba(238, 231, 218, 0.92);
-  transform: rotate(24deg);
+  background: transparent;
 }
 
 .settings-button:hover img,
