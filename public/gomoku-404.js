@@ -17,6 +17,11 @@ const DEFAULT_OPTIONS = {
   difficulty: 'expert',
   forbiddenRule: 'none',
 };
+const OPTIONS_STORAGE_KEY = 'gomoku-404-options';
+const OPTION_VALUES = {
+  difficulty: new Set(['normal', 'hard', 'expert']),
+  forbiddenRule: new Set(['none', 'renju']),
+};
 const moduleBaseUrl = new URL('.', import.meta.url);
 const apiBaseUrl = new URL(window.GOMOKU_404_API_BASE ?? moduleBaseUrl.origin);
 const settingsIconUrl = new URL('/asset/setting.png', apiBaseUrl).href;
@@ -168,7 +173,7 @@ const state = {
   started: false,
   status: 'idle',
   thinking: false,
-  options: { ...DEFAULT_OPTIONS },
+  options: readCachedOptions(),
   winLine: [],
   winner: null,
 };
@@ -381,6 +386,31 @@ function wait(ms) {
   });
 }
 
+function normalizeOptions(options = {}) {
+  return {
+    difficulty: OPTION_VALUES.difficulty.has(options.difficulty) ? options.difficulty : DEFAULT_OPTIONS.difficulty,
+    forbiddenRule: OPTION_VALUES.forbiddenRule.has(options.forbiddenRule)
+      ? options.forbiddenRule
+      : DEFAULT_OPTIONS.forbiddenRule,
+  };
+}
+
+function readCachedOptions() {
+  try {
+    return normalizeOptions(JSON.parse(localStorage.getItem(OPTIONS_STORAGE_KEY) ?? '{}'));
+  } catch {
+    return { ...DEFAULT_OPTIONS };
+  }
+}
+
+function cacheOptions(options) {
+  try {
+    localStorage.setItem(OPTIONS_STORAGE_KEY, JSON.stringify(normalizeOptions(options)));
+  } catch {
+    // Option persistence should never block gameplay.
+  }
+}
+
 function optionsPayload(extra = {}) {
   return {
     difficulty: state.options.difficulty,
@@ -411,7 +441,8 @@ function toggleSettingsPanel() {
 
 async function applyOption(name, value) {
   if (state.options[name] === value) return;
-  state.options = { ...state.options, [name]: value };
+  state.options = normalizeOptions({ ...state.options, [name]: value });
+  cacheOptions(state.options);
   updateSettingsControls();
 
   if (!state.started || !state.sessionId) return;
@@ -613,7 +644,8 @@ function updateUi(session) {
   state.sessionId = session.id;
   state.status = session.status;
   state.winner = session.winner;
-  state.options = { ...state.options, ...(session.options ?? {}) };
+  state.options = normalizeOptions({ ...state.options, ...(session.options ?? {}) });
+  cacheOptions(state.options);
   state.winLine = session.winLine ?? [];
   state.lastMove = session.history.at(-1) ?? null;
 

@@ -7,6 +7,7 @@ const chromePath =
 const errors = [];
 const screenshots = [];
 const expectedSettingsIconUrl = new URL('/asset/setting.png', url).href;
+const optionsStorageKey = 'gomoku-404-options';
 
 function screenshotPath(name) {
   const path = `/private/tmp/gomoku-404-${name}.png`;
@@ -102,6 +103,7 @@ await page.click('[data-option="difficulty"][data-value="hard"]');
 await page.click('[data-option="forbiddenRule"][data-value="renju"]');
 await page.waitForTimeout(400);
 const optionsOpen = await sample(page);
+const cachedOptions = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}'), optionsStorageKey);
 await page.screenshot({ path: screenshotPath('options'), fullPage: false });
 await page.keyboard.press('Escape');
 await page.waitForTimeout(120);
@@ -115,10 +117,14 @@ await page.waitForTimeout(1200);
 const afterClick = await sample(page);
 await page.screenshot({ path: screenshotPath('after-click'), fullPage: false });
 
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(500);
+const reloaded = await sample(page);
+
 const randomSession = await apiState(page);
 await browser.close();
 
-const result = { afterClick, errors, initial, optionsOpen, randomSession, screenshots, started };
+const result = { afterClick, cachedOptions, errors, initial, optionsOpen, randomSession, reloaded, screenshots, started };
 console.log(JSON.stringify(result, null, 2));
 
 if (
@@ -140,6 +146,10 @@ if (
   optionsOpen.settingsButtonTransform !== 'none' ||
   optionsOpen.selectedDifficulty !== 'hard' ||
   optionsOpen.selectedForbiddenRule !== 'renju' ||
+  cachedOptions.difficulty !== 'hard' ||
+  cachedOptions.forbiddenRule !== 'renju' ||
+  reloaded.selectedDifficulty !== 'hard' ||
+  reloaded.selectedForbiddenRule !== 'renju' ||
   randomSession.options?.forbiddenRule !== 'none' ||
   randomSession.humanPlayer !== 1 && randomSession.humanPlayer !== 2 ||
   randomSession.serverPlayer !== 1 && randomSession.serverPlayer !== 2 ||

@@ -113,6 +113,18 @@ for row, col in ((7, 5), (7, 6), (5, 7), (6, 7)):
     place_move(block_double_three_board, row, col, BLACK)
 assert_move(choose_server_move(block_double_three_board, WHITE), 7, 7, "AI did not block a double-three threat.")
 
+cross_double_three_board = create_board()
+for row, col in ((6, 7), (7, 6), (7, 8), (8, 7)):
+    place_move(cross_double_three_board, row, col, BLACK)
+for row, col in ((3, 5), (3, 6), (1, 3), (2, 3)):
+    place_move(cross_double_three_board, row, col, WHITE)
+assert_move(
+    choose_server_move(cross_double_three_board, WHITE, forbidden_rule="none"),
+    7,
+    7,
+    "AI created its own double-three instead of blocking the cross double-three.",
+)
+
 forbidden_board = create_board()
 for row, col in ((7, 5), (7, 6), (5, 7), (6, 7)):
     place_move(forbidden_board, row, col, BLACK)

@@ -632,13 +632,13 @@ def find_tactical_move(board: list[list[int]], ai_player: int, forbidden_rule: s
     if block_severe:
         return block_severe
 
-    own_double_three = pick_tactical(ai_moves, lambda threat: threat["doubleThree"], "double-three")
-    if own_double_three:
-        return own_double_three
-
     block_double_three = pick_tactical(human_moves, lambda threat: threat["doubleThree"], "contain")
     if block_double_three:
         return block_double_three
+
+    own_double_three = pick_tactical(ai_moves, lambda threat: threat["doubleThree"], "double-three")
+    if own_double_three:
+        return own_double_three
 
     return None
 
