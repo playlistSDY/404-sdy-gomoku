@@ -51,7 +51,7 @@ DIFFICULTY_SETTINGS = {
     },
     "expert": {
         "branchLimit": BRANCH_MOVE_LIMIT,
-        "depths": (2, 3, 4),
+        "depths": (2, 3, 4, 5),
         "forcingTime": FORCING_SEARCH_TIME_SECONDS,
         "leafLimit": LEAF_MOVE_LIMIT,
         "rootLimit": ROOT_MOVE_LIMIT,
@@ -62,6 +62,8 @@ DIFFICULTY_SETTINGS = {
         "vctDepth": VCT_DEPTH,
     },
 }
+ZOBRIST_MASK = (1 << 64) - 1
+ZOBRIST_SEED = 0x9E3779B97F4A7C15
 
 
 def get_difficulty_settings(difficulty: str | None = None) -> dict:
@@ -73,7 +75,40 @@ def normalize_difficulty(difficulty: str | None) -> str:
 
 
 def normalize_forbidden_rule(rule: str | None) -> str:
-    return "renju" if rule == "renju" else DEFAULT_FORBIDDEN_RULE
+    return rule if rule in ("none", "renju") else DEFAULT_FORBIDDEN_RULE
+
+
+def splitmix64(value: int) -> int:
+    value = (value + ZOBRIST_SEED) & ZOBRIST_MASK
+    value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & ZOBRIST_MASK
+    value = ((value ^ (value >> 27)) * 0x94D049BB133111EB) & ZOBRIST_MASK
+    return (value ^ (value >> 31)) & ZOBRIST_MASK
+
+
+ZOBRIST_TABLE = tuple(
+    tuple(
+        (
+            splitmix64((row * BOARD_SIZE + col) * 2 + BLACK),
+            splitmix64((row * BOARD_SIZE + col) * 2 + WHITE),
+        )
+        for col in range(BOARD_SIZE)
+    )
+    for row in range(BOARD_SIZE)
+)
+
+
+def zobrist_value(row: int, col: int, player: int) -> int:
+    return ZOBRIST_TABLE[row][col][player - 1]
+
+
+def zobrist_hash(board: list[list[int]]) -> int:
+    position_hash = 0
+    for row in range(BOARD_SIZE):
+        for col in range(BOARD_SIZE):
+            player = board[row][col]
+            if player != EMPTY:
+                position_hash ^= zobrist_value(row, col, player)
+    return position_hash
 
 
 def create_board() -> list[list[int]]:
@@ -107,10 +142,6 @@ def place_move(board: list[list[int]], row: int, col: int, player: int) -> None:
     if board[row][col] != EMPTY:
         raise ValueError("Intersection is already occupied.")
     board[row][col] = player
-
-
-def board_key(board: list[list[int]]) -> tuple[tuple[int, ...], ...]:
-    return tuple(tuple(row) for row in board)
 
 
 def board_is_full(board: list[list[int]]) -> bool:
@@ -694,6 +725,7 @@ def vcf_can_win(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
         return False
@@ -702,7 +734,8 @@ def vcf_can_win(
     if depth <= 0:
         return False
 
-    key = ("vcf", board_key(board), attacker, depth)
+    position_hash = zobrist_hash(board) if position_hash is None else position_hash
+    key = ("vcf", position_hash, attacker, depth)
     if key in table:
         return table[key]
 
@@ -714,6 +747,7 @@ def vcf_can_win(
         row = move["row"]
         col = move["col"]
         board[row][col] = attacker
+        move_hash = position_hash ^ zobrist_value(row, col, attacker)
         success = False
 
         if check_win_from(board, row, col, attacker):
@@ -726,7 +760,16 @@ def vcf_can_win(
                 response = responses[0]
                 board[response["row"]][response["col"]] = defender
                 if not check_win_from(board, response["row"], response["col"], defender):
-                    success = vcf_can_win(board, attacker, depth - 2, deadline, table, forbidden_rule)
+                    response_hash = move_hash ^ zobrist_value(response["row"], response["col"], defender)
+                    success = vcf_can_win(
+                        board,
+                        attacker,
+                        depth - 2,
+                        deadline,
+                        table,
+                        forbidden_rule,
+                        response_hash,
+                    )
                 board[response["row"]][response["col"]] = EMPTY
 
         board[row][col] = EMPTY
@@ -746,6 +789,7 @@ def vcf_move_succeeds(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
         return False
@@ -753,7 +797,9 @@ def vcf_move_succeeds(
     defender = other_player(attacker)
     row = move["row"]
     col = move["col"]
+    position_hash = zobrist_hash(board) if position_hash is None else position_hash
     board[row][col] = attacker
+    move_hash = position_hash ^ zobrist_value(row, col, attacker)
     success = False
 
     if check_win_from(board, row, col, attacker):
@@ -766,7 +812,16 @@ def vcf_move_succeeds(
             response = responses[0]
             board[response["row"]][response["col"]] = defender
             if not check_win_from(board, response["row"], response["col"], defender):
-                success = vcf_can_win(board, attacker, depth - 2, deadline, table, forbidden_rule)
+                response_hash = move_hash ^ zobrist_value(response["row"], response["col"], defender)
+                success = vcf_can_win(
+                    board,
+                    attacker,
+                    depth - 2,
+                    deadline,
+                    table,
+                    forbidden_rule,
+                    response_hash,
+                )
             board[response["row"]][response["col"]] = EMPTY
 
     board[row][col] = EMPTY
@@ -780,13 +835,15 @@ def find_vcf_move(
     max_depth: int = VCF_DEPTH,
     reason: str = "vcf",
     forbidden_rule: str | None = None,
+    position_hash: int | None = None,
 ) -> dict | None:
     deadline = deadline if deadline is not None else time.monotonic() + FORCING_SEARCH_TIME_SECONDS
     if time.monotonic() > deadline:
         return None
+    position_hash = zobrist_hash(board) if position_hash is None else position_hash
     table: dict = {}
     for move in forcing_moves(board, attacker, VCF_MOVE_LIMIT, vct=False, forbidden_rule=forbidden_rule):
-        if vcf_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule):
+        if vcf_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule, position_hash):
             return with_reason(move, reason)
         if time.monotonic() > deadline:
             break
@@ -830,7 +887,16 @@ def block_vcf_move(
     if time.monotonic() > deadline:
         return None
     attacker = other_player(ai_player)
-    threat = find_vcf_move(board, attacker, deadline, max_depth=max_depth - 2, reason="vcf", forbidden_rule=forbidden_rule)
+    position_hash = zobrist_hash(board)
+    threat = find_vcf_move(
+        board,
+        attacker,
+        deadline,
+        max_depth=max_depth - 2,
+        reason="vcf",
+        forbidden_rule=forbidden_rule,
+        position_hash=position_hash,
+    )
     if not threat:
         return None
 
@@ -846,6 +912,7 @@ def block_vcf_move(
         if time.monotonic() > deadline:
             break
         board[move["row"]][move["col"]] = ai_player
+        defense_hash = position_hash ^ zobrist_value(move["row"], move["col"], ai_player)
         still_losing = find_vcf_move(
             board,
             attacker,
@@ -853,6 +920,7 @@ def block_vcf_move(
             max_depth=max_depth - 2,
             reason="vcf",
             forbidden_rule=forbidden_rule,
+            position_hash=defense_hash,
         )
         board[move["row"]][move["col"]] = EMPTY
         if not still_losing:
@@ -906,6 +974,7 @@ def vct_can_win(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
         return False
@@ -914,7 +983,8 @@ def vct_can_win(
     if depth <= 0:
         return False
 
-    key = ("vct", board_key(board), attacker, depth)
+    position_hash = zobrist_hash(board) if position_hash is None else position_hash
+    key = ("vct", position_hash, attacker, depth)
     if key in table:
         return table[key]
 
@@ -926,6 +996,7 @@ def vct_can_win(
         row = move["row"]
         col = move["col"]
         board[row][col] = attacker
+        move_hash = position_hash ^ zobrist_value(row, col, attacker)
         success = False
 
         if check_win_from(board, row, col, attacker):
@@ -942,6 +1013,7 @@ def vct_can_win(
                         break
                     board[response["row"]][response["col"]] = defender
                     defender_wins = check_win_from(board, response["row"], response["col"], defender)
+                    response_hash = move_hash ^ zobrist_value(response["row"], response["col"], defender)
                     branch_wins = not defender_wins and vct_can_win(
                         board,
                         attacker,
@@ -949,6 +1021,7 @@ def vct_can_win(
                         deadline,
                         table,
                         forbidden_rule,
+                        response_hash,
                     )
                     board[response["row"]][response["col"]] = EMPTY
                     if not branch_wins:
@@ -972,6 +1045,7 @@ def vct_move_succeeds(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
         return False
@@ -979,7 +1053,9 @@ def vct_move_succeeds(
     defender = other_player(attacker)
     row = move["row"]
     col = move["col"]
+    position_hash = zobrist_hash(board) if position_hash is None else position_hash
     board[row][col] = attacker
+    move_hash = position_hash ^ zobrist_value(row, col, attacker)
     success = False
 
     if check_win_from(board, row, col, attacker):
@@ -996,6 +1072,7 @@ def vct_move_succeeds(
                     break
                 board[response["row"]][response["col"]] = defender
                 defender_wins = check_win_from(board, response["row"], response["col"], defender)
+                response_hash = move_hash ^ zobrist_value(response["row"], response["col"], defender)
                 branch_wins = not defender_wins and vct_can_win(
                     board,
                     attacker,
@@ -1003,6 +1080,7 @@ def vct_move_succeeds(
                     deadline,
                     table,
                     forbidden_rule,
+                    response_hash,
                 )
                 board[response["row"]][response["col"]] = EMPTY
                 if not branch_wins:
@@ -1020,12 +1098,14 @@ def find_vct_move(
     max_depth: int = VCT_DEPTH,
     reason: str = "vct",
     forbidden_rule: str | None = None,
+    position_hash: int | None = None,
 ) -> dict | None:
     if time.monotonic() > deadline:
         return None
+    position_hash = zobrist_hash(board) if position_hash is None else position_hash
     table: dict = {}
     for move in forcing_moves(board, attacker, VCT_MOVE_LIMIT, vct=True, forbidden_rule=forbidden_rule):
-        if vct_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule):
+        if vct_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule, position_hash):
             return with_reason(move, reason)
         if time.monotonic() > deadline:
             break
@@ -1042,7 +1122,16 @@ def block_vct_move(
     if time.monotonic() > deadline:
         return None
     attacker = other_player(ai_player)
-    threat = find_vct_move(board, attacker, deadline, max_depth=max_depth - 2, reason="vct", forbidden_rule=forbidden_rule)
+    position_hash = zobrist_hash(board)
+    threat = find_vct_move(
+        board,
+        attacker,
+        deadline,
+        max_depth=max_depth - 2,
+        reason="vct",
+        forbidden_rule=forbidden_rule,
+        position_hash=position_hash,
+    )
     if not threat:
         return None
 
@@ -1058,6 +1147,7 @@ def block_vct_move(
         if time.monotonic() > deadline:
             break
         board[move["row"]][move["col"]] = ai_player
+        defense_hash = position_hash ^ zobrist_value(move["row"], move["col"], ai_player)
         still_losing = find_vct_move(
             board,
             attacker,
@@ -1065,6 +1155,7 @@ def block_vct_move(
             max_depth=max_depth - 2,
             reason="vct",
             forbidden_rule=forbidden_rule,
+            position_hash=defense_hash,
         )
         board[move["row"]][move["col"]] = EMPTY
         if not still_losing:
@@ -1134,6 +1225,7 @@ def minimax(
     transposition: dict | None = None,
     settings: dict | None = None,
     forbidden_rule: str | None = None,
+    position_hash: int | None = None,
 ) -> dict:
     if time.monotonic() > deadline:
         return {"score": evaluate_board(board, ai_player, forbidden_rule), "timedOut": True}
@@ -1141,6 +1233,7 @@ def minimax(
     if transposition is None:
         transposition = {}
     settings = settings or get_difficulty_settings()
+    position_hash = zobrist_hash(board) if position_hash is None else position_hash
 
     if last_move:
         result = check_win_from(board, last_move["row"], last_move["col"], last_move["player"])
@@ -1155,7 +1248,7 @@ def minimax(
     if board_is_full(board):
         return {"score": 0, "timedOut": False}
 
-    key = (board_key(board), current_player, ai_player, depth, normalize_forbidden_rule(forbidden_rule))
+    key = (position_hash, current_player, ai_player, depth, normalize_forbidden_rule(forbidden_rule))
     cached = transposition.get(key)
     if cached is not None:
         return {"score": cached, "timedOut": False}
@@ -1188,6 +1281,7 @@ def minimax(
 
     for move in moves:
         board[move["row"]][move["col"]] = current_player
+        move_hash = position_hash ^ zobrist_value(move["row"], move["col"], current_player)
         child = minimax(
             board,
             depth - 1,
@@ -1200,6 +1294,7 @@ def minimax(
             transposition,
             settings,
             forbidden_rule,
+            move_hash,
         )
         board[move["row"]][move["col"]] = EMPTY
         timed_out = timed_out or child.get("timedOut", False)
@@ -1227,8 +1322,21 @@ def choose_alpha_beta_move(
     ai_player: int,
     settings: dict | None = None,
     forbidden_rule: str | None = None,
+    difficulty: str | None = None,
 ) -> dict | None:
     settings = settings or get_difficulty_settings()
+    difficulty = normalize_difficulty(difficulty)
+    forbidden_rule = normalize_forbidden_rule(forbidden_rule)
+
+    try:
+        from .native_alpha_beta import choose_alpha_beta_move_native
+
+        native_move = choose_alpha_beta_move_native(board, ai_player, difficulty, forbidden_rule)
+        if native_move:
+            return native_move
+    except Exception:
+        pass
+
     deadline = time.monotonic() + settings["searchTime"]
     human_player = other_player(ai_player)
     root_radius = (
@@ -1257,6 +1365,7 @@ def choose_alpha_beta_move(
     best_move = root_moves[0] if root_moves else None
     best_score = -math.inf
     transposition: dict = {}
+    root_hash = zobrist_hash(board)
 
     for depth in settings["depths"]:
         depth_best = best_move
@@ -1269,6 +1378,7 @@ def choose_alpha_beta_move(
                 break
 
             board[move["row"]][move["col"]] = ai_player
+            move_hash = root_hash ^ zobrist_value(move["row"], move["col"], ai_player)
             result = minimax(
                 board,
                 depth - 1,
@@ -1281,6 +1391,7 @@ def choose_alpha_beta_move(
                 transposition,
                 settings,
                 forbidden_rule,
+                move_hash,
             )
             board[move["row"]][move["col"]] = EMPTY
             score = result["score"] - move.get("safetyPenalty", 0)
@@ -1385,11 +1496,16 @@ def choose_server_move(
             if vct_block:
                 return vct_block
 
-    searched_move = choose_alpha_beta_move(board, ai_player, settings, forbidden_rule)
+    searched_move = choose_alpha_beta_move(board, ai_player, settings, forbidden_rule, difficulty)
     if searched_move:
         return searched_move
 
-    fallback = ordered_moves(board, ai_player, 1, forbidden_rule=forbidden_rule)[0]
+    fallback = ordered_moves(
+        board,
+        ai_player,
+        limit=1,
+        forbidden_rule=forbidden_rule,
+    )[0]
     return {
         "row": fallback["row"],
         "col": fallback["col"],

@@ -118,7 +118,7 @@ app.innerHTML = `
   </main>
   <div class="micro-status hidden" id="micro-status"></div>
   <button class="settings-button" id="settings-button" type="button" aria-label="옵션 열기" aria-expanded="false">
-    <span aria-hidden="true">⚙</span>
+    <img src="/asset/setting.png" alt="" aria-hidden="true" />
   </button>
   <section class="settings-panel hidden" id="settings-panel" aria-label="옵션">
     <div class="settings-row">
@@ -133,7 +133,7 @@ app.innerHTML = `
       <span class="settings-label">금수</span>
       <div class="segmented-control" role="group" aria-label="금수">
         <button type="button" data-option="forbiddenRule" data-value="none">끄기</button>
-        <button type="button" data-option="forbiddenRule" data-value="renju">렌주</button>
+        <button type="button" data-option="forbiddenRule" data-value="renju">간이 렌주</button>
       </div>
     </div>
   </section>

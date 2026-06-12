@@ -7,14 +7,19 @@ if str(ROOT) not in sys.path:
 
 from app.gomoku_engine import (
     BLACK,
+    DEFAULT_FORBIDDEN_RULE,
     WHITE,
     check_win_from,
     classify_line_pattern,
     choose_server_move,
     create_board,
+    get_difficulty_settings,
     get_winner,
     is_forbidden_move,
+    normalize_forbidden_rule,
     place_move,
+    zobrist_hash,
+    zobrist_value,
 )
 
 
@@ -28,6 +33,15 @@ def assert_move(move: dict, row: int, col: int, message: str) -> None:
 
 
 board = create_board()
+empty_hash = zobrist_hash(board)
+place_move(board, 7, 7, BLACK)
+assert_true(
+    zobrist_hash(board) == empty_hash ^ zobrist_value(7, 7, BLACK),
+    "Zobrist hash did not update by xor for a black move.",
+)
+board[7][7] = 0
+
+assert_true(get_difficulty_settings("expert")["depths"][-1] == 5, "Expert search did not attempt depth 5.")
 empty_opening = choose_server_move(board, BLACK)
 assert_move(empty_opening, 7, 7, "AI did not open at the center on an empty board.")
 
@@ -102,6 +116,9 @@ assert_move(choose_server_move(block_double_three_board, WHITE), 7, 7, "AI did n
 forbidden_board = create_board()
 for row, col in ((7, 5), (7, 6), (5, 7), (6, 7)):
     place_move(forbidden_board, row, col, BLACK)
+assert_true(DEFAULT_FORBIDDEN_RULE == "none", "Forbidden rule should default to free rule.")
+assert_true(normalize_forbidden_rule(None) == "none", "Missing forbidden rule did not normalize to free rule.")
+assert_true(normalize_forbidden_rule("none") == "none", "Forbidden rule off option did not normalize.")
 assert_true(is_forbidden_move(forbidden_board, 7, 7, BLACK, "renju"), "Double-three forbidden move failed.")
 forbidden_ai_move = choose_server_move(forbidden_board, BLACK, forbidden_rule="renju")
 assert_true(

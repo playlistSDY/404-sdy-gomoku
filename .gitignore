@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 npm-debug.log
 *.log
+/native/gomoku_alpha_beta

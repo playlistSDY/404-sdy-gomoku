@@ -52,6 +52,7 @@ async function sample(page) {
       selectedDifficulty: document.querySelector('[data-option="difficulty"].is-selected')?.dataset.value ?? '',
       selectedForbiddenRule: document.querySelector('[data-option="forbiddenRule"].is-selected')?.dataset.value ?? '',
       settingsButtonOpacity: getComputedStyle(document.querySelector('#settings-button')).opacity,
+      settingsIconLoaded: document.querySelector('#settings-button img')?.naturalWidth > 0,
       settingsPanelHidden: document.querySelector('#settings-panel').classList.contains('hidden'),
       status: document.querySelector('#micro-status').textContent,
       statusHidden: document.querySelector('#micro-status').classList.contains('hidden'),
@@ -122,11 +123,15 @@ if (
   started.heroVisible > 0.2 ||
   started.retryText !== '다시하기' ||
   !started.resultHidden ||
+  initial.selectedForbiddenRule !== 'none' ||
+  started.selectedForbiddenRule !== 'none' ||
   Number(initial.settingsButtonOpacity) > 0.1 ||
   Number(started.settingsButtonOpacity) < 0.8 ||
+  !started.settingsIconLoaded ||
   optionsOpen.settingsPanelHidden ||
   optionsOpen.selectedDifficulty !== 'hard' ||
   optionsOpen.selectedForbiddenRule !== 'renju' ||
+  randomSession.options?.forbiddenRule !== 'none' ||
   randomSession.humanPlayer !== 1 && randomSession.humanPlayer !== 2 ||
   randomSession.serverPlayer !== 1 && randomSession.serverPlayer !== 2 ||
   randomSession.humanPlayer === randomSession.serverPlayer ||
