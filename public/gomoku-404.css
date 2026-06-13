@@ -285,7 +285,7 @@ button {
   background: rgba(17, 20, 18, 0.045);
 }
 
-.settings-row:last-child .segmented-control {
+.segmented-control.is-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 

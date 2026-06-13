@@ -34,6 +34,7 @@ def choose_alpha_beta_move_native(
     ai_player: int,
     difficulty: str,
     forbidden_rule: str,
+    tactic_style: str,
 ) -> dict | None:
     binary = native_binary_path()
     if not binary:
@@ -43,7 +44,7 @@ def choose_alpha_beta_move_native(
     if len(cells) != BOARD_SIZE * BOARD_SIZE:
         return None
 
-    payload = f"{ai_player} {difficulty} {forbidden_rule}\n{cells}\n"
+    payload = f"{ai_player} {difficulty} {forbidden_rule} {tactic_style}\n{cells}\n"
     try:
         result = subprocess.run(
             [str(binary)],

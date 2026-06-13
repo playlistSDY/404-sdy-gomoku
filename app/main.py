@@ -13,6 +13,7 @@ from .gomoku_engine import (
     BLACK,
     DEFAULT_DIFFICULTY,
     DEFAULT_FORBIDDEN_RULE,
+    DEFAULT_TACTIC_STYLE,
     WHITE,
     choose_server_move,
     create_board,
@@ -20,6 +21,7 @@ from .gomoku_engine import (
     is_forbidden_move,
     normalize_difficulty,
     normalize_forbidden_rule,
+    normalize_tactic_style,
     other_player,
     place_move,
     serialize_move,
@@ -51,6 +53,9 @@ def normalize_session_options(options: dict[str, Any] | None = None) -> dict[str
         "forbiddenRule": normalize_forbidden_rule(
             options.get("forbiddenRule") or nested.get("forbiddenRule") or DEFAULT_FORBIDDEN_RULE
         ),
+        "tacticStyle": normalize_tactic_style(
+            options.get("tacticStyle") or nested.get("tacticStyle") or DEFAULT_TACTIC_STYLE
+        ),
     }
 
 
@@ -59,6 +64,7 @@ def update_session_options(session: dict[str, Any], options: dict[str, Any]) -> 
     merged = {
         "difficulty": options.get("difficulty", current["difficulty"]),
         "forbiddenRule": options.get("forbiddenRule", current["forbiddenRule"]),
+        "tacticStyle": options.get("tacticStyle", current.get("tacticStyle", DEFAULT_TACTIC_STYLE)),
     }
     session["options"] = normalize_session_options(merged)
 
@@ -70,6 +76,7 @@ def make_server_move(session: dict[str, Any]) -> None:
         session["serverPlayer"],
         difficulty=options["difficulty"],
         forbidden_rule=options["forbiddenRule"],
+        tactic_style=options["tacticStyle"],
     )
     if not server_move:
         return

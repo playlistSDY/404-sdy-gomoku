@@ -16,11 +16,13 @@ const START_INPUT_DELAY_MS = 710;
 const DEFAULT_OPTIONS = {
   difficulty: 'expert',
   forbiddenRule: 'none',
+  tacticStyle: 'defensive',
 };
 const OPTIONS_STORAGE_KEY = 'gomoku-404-options';
 const OPTION_VALUES = {
   difficulty: new Set(['normal', 'hard', 'expert']),
   forbiddenRule: new Set(['none', 'renju']),
+  tacticStyle: new Set(['defensive', 'aggressive']),
 };
 const moduleBaseUrl = new URL('.', import.meta.url);
 const apiBaseUrl = new URL(window.GOMOKU_404_API_BASE ?? moduleBaseUrl.origin);
@@ -52,6 +54,12 @@ class SimpleOrbitControls {
       lastY: 0,
       pointerId: null,
     };
+    this.pinch = {
+      active: false,
+      startDistance: 0,
+      startRadius: this.goal.radius,
+    };
+    this.activePointers = new Map();
 
     this.domElement.style.touchAction = 'none';
     this.domElement.addEventListener('pointerdown', (event) => this.handlePointerDown(event));
@@ -66,16 +74,60 @@ class SimpleOrbitControls {
     this.goal.radius = Math.min(this.maxDistance, Math.max(this.minDistance, this.goal.radius));
   }
 
+  pointerDistance() {
+    const points = [...this.activePointers.values()];
+    if (points.length < 2) return 0;
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+  }
+
+  beginPinch() {
+    const distance = this.pointerDistance();
+    if (!distance) return;
+    this.pinch.active = true;
+    this.pinch.startDistance = distance;
+    this.pinch.startRadius = this.goal.radius;
+    this.drag.active = false;
+    this.drag.pointerId = null;
+  }
+
   handlePointerDown(event) {
-    if (event.button !== 0) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    try {
+      this.domElement.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Synthetic pointer events used in render checks do not always create capturable pointers.
+    }
+
+    if (this.activePointers.size >= 2) {
+      this.beginPinch();
+      return;
+    }
+
     this.drag.active = true;
     this.drag.lastX = event.clientX;
     this.drag.lastY = event.clientY;
     this.drag.pointerId = event.pointerId;
-    this.domElement.setPointerCapture?.(event.pointerId);
   }
 
   handlePointerMove(event) {
+    const trackedPointer = this.activePointers.get(event.pointerId);
+    if (!trackedPointer) return;
+    event.preventDefault();
+    trackedPointer.x = event.clientX;
+    trackedPointer.y = event.clientY;
+
+    if (this.activePointers.size >= 2) {
+      if (!this.pinch.active) this.beginPinch();
+      const distance = this.pointerDistance();
+      if (distance) {
+        this.goal.radius = this.pinch.startRadius * (this.pinch.startDistance / distance);
+        this.clampGoal();
+      }
+      return;
+    }
+
     if (!this.drag.active || event.pointerId !== this.drag.pointerId) return;
     const dx = event.clientX - this.drag.lastX;
     const dy = event.clientY - this.drag.lastY;
@@ -88,10 +140,31 @@ class SimpleOrbitControls {
   }
 
   handlePointerUp(event) {
-    if (event.pointerId !== this.drag.pointerId) return;
+    if (!this.activePointers.has(event.pointerId) && event.pointerId !== this.drag.pointerId) return;
+    this.activePointers.delete(event.pointerId);
+    try {
+      this.domElement.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture may not exist for synthetic or cancelled touch events.
+    }
+
+    if (this.activePointers.size >= 2) {
+      this.beginPinch();
+      return;
+    }
+
+    this.pinch.active = false;
+    if (this.activePointers.size === 1) {
+      const [pointerId, point] = this.activePointers.entries().next().value;
+      this.drag.active = true;
+      this.drag.lastX = point.x;
+      this.drag.lastY = point.y;
+      this.drag.pointerId = pointerId;
+      return;
+    }
+
     this.drag.active = false;
     this.drag.pointerId = null;
-    this.domElement.releasePointerCapture?.(event.pointerId);
   }
 
   handleWheel(event) {
@@ -137,9 +210,16 @@ app.innerHTML = `
     </div>
     <div class="settings-row">
       <span class="settings-label">금수</span>
-      <div class="segmented-control" role="group" aria-label="금수">
+      <div class="segmented-control is-two" role="group" aria-label="금수">
         <button type="button" data-option="forbiddenRule" data-value="none">끄기</button>
         <button type="button" data-option="forbiddenRule" data-value="renju">간이 렌주</button>
+      </div>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">전술</span>
+      <div class="segmented-control is-two" role="group" aria-label="전술">
+        <button type="button" data-option="tacticStyle" data-value="defensive">방어적</button>
+        <button type="button" data-option="tacticStyle" data-value="aggressive">공격적</button>
       </div>
     </div>
   </section>
@@ -179,6 +259,7 @@ const state = {
 };
 
 const pointerGesture = {
+  activePointers: new Set(),
   downX: 0,
   downY: 0,
   dragging: false,
@@ -392,6 +473,7 @@ function normalizeOptions(options = {}) {
     forbiddenRule: OPTION_VALUES.forbiddenRule.has(options.forbiddenRule)
       ? options.forbiddenRule
       : DEFAULT_OPTIONS.forbiddenRule,
+    tacticStyle: OPTION_VALUES.tacticStyle.has(options.tacticStyle) ? options.tacticStyle : DEFAULT_OPTIONS.tacticStyle,
   };
 }
 
@@ -415,6 +497,7 @@ function optionsPayload(extra = {}) {
   return {
     difficulty: state.options.difficulty,
     forbiddenRule: state.options.forbiddenRule,
+    tacticStyle: state.options.tacticStyle,
     ...extra,
   };
 }
@@ -802,6 +885,14 @@ function resize() {
 }
 
 canvas.addEventListener('pointermove', (event) => {
+  if (pointerGesture.activePointers.size > 1) {
+    pointerGesture.dragging = true;
+    pointerGesture.suppressClick = true;
+    state.hover = null;
+    hoverMarker.visible = false;
+    return;
+  }
+
   setPointer(event);
   if (event.buttons === 1) {
     const distance = Math.hypot(event.clientX - pointerGesture.downX, event.clientY - pointerGesture.downY);
@@ -814,14 +905,30 @@ canvas.addEventListener('pointermove', (event) => {
 });
 
 canvas.addEventListener('pointerdown', (event) => {
+  pointerGesture.activePointers.add(event.pointerId);
+  if (pointerGesture.activePointers.size > 1) {
+    pointerGesture.dragging = true;
+    pointerGesture.suppressClick = true;
+    state.hover = null;
+    hoverMarker.visible = false;
+    return;
+  }
+
   pointerGesture.downX = event.clientX;
   pointerGesture.downY = event.clientY;
   pointerGesture.dragging = false;
   pointerGesture.suppressClick = false;
 });
 
-canvas.addEventListener('pointerup', () => {
+canvas.addEventListener('pointerup', (event) => {
+  pointerGesture.activePointers.delete(event.pointerId);
   if (pointerGesture.dragging) pointerGesture.suppressClick = true;
+});
+
+canvas.addEventListener('pointercancel', (event) => {
+  pointerGesture.activePointers.delete(event.pointerId);
+  pointerGesture.dragging = false;
+  pointerGesture.suppressClick = true;
 });
 
 canvas.addEventListener('pointerleave', () => {

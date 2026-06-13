@@ -24,6 +24,7 @@ VCF_BLOCK_CANDIDATE_LIMIT = 12
 VCT_BLOCK_CANDIDATE_LIMIT = 10
 DEFAULT_DIFFICULTY = "expert"
 DEFAULT_FORBIDDEN_RULE = "none"
+DEFAULT_TACTIC_STYLE = "defensive"
 DIFFICULTY_SETTINGS = {
     "normal": {
         "branchLimit": 7,
@@ -62,6 +63,24 @@ DIFFICULTY_SETTINGS = {
         "vctDepth": VCT_DEPTH,
     },
 }
+TACTIC_STYLE_WEIGHTS = {
+    "defensive": {
+        "attack": 1.0,
+        "defense": 1.16,
+        "attackThreat": 0.24,
+        "defenseThreat": 0.16,
+        "boardDefense": 1.08,
+        "safety": 0.55,
+    },
+    "aggressive": {
+        "attack": 1.08,
+        "defense": 1.02,
+        "attackThreat": 0.34,
+        "defenseThreat": 0.11,
+        "boardDefense": 0.98,
+        "safety": 0.43,
+    },
+}
 ZOBRIST_MASK = (1 << 64) - 1
 ZOBRIST_SEED = 0x9E3779B97F4A7C15
 
@@ -76,6 +95,14 @@ def normalize_difficulty(difficulty: str | None) -> str:
 
 def normalize_forbidden_rule(rule: str | None) -> str:
     return rule if rule in ("none", "renju") else DEFAULT_FORBIDDEN_RULE
+
+
+def normalize_tactic_style(style: str | None) -> str:
+    return style if style in TACTIC_STYLE_WEIGHTS else DEFAULT_TACTIC_STYLE
+
+
+def tactic_weights(style: str | None) -> dict:
+    return TACTIC_STYLE_WEIGHTS[normalize_tactic_style(style)]
 
 
 def splitmix64(value: int) -> int:
@@ -560,9 +587,16 @@ def threat_priority(threat: dict) -> int:
     return 0
 
 
-def candidate_score(board: list[list[int]], candidate: dict, player: int, defending_player: int | None = None) -> dict:
+def candidate_score(
+    board: list[list[int]],
+    candidate: dict,
+    player: int,
+    defending_player: int | None = None,
+    tactic_style: str | None = None,
+) -> dict:
     if defending_player is None:
         defending_player = other_player(player)
+    weights = tactic_weights(tactic_style)
     attack = score_move(board, candidate["row"], candidate["col"], player)
     defense = score_move(board, candidate["row"], candidate["col"], defending_player)
     threat = threat_summary(board, candidate["row"], candidate["col"], player)
@@ -573,7 +607,12 @@ def candidate_score(board: list[list[int]], candidate: dict, player: int, defend
         "defense": defense,
         "defenseThreat": defense_threat,
         "priority": threat_priority(threat),
-        "score": attack + defense * 1.16 + threat["rank"] * 0.24 + defense_threat["rank"] * 0.16,
+        "score": (
+            attack * weights["attack"]
+            + defense * weights["defense"]
+            + threat["rank"] * weights["attackThreat"]
+            + defense_threat["rank"] * weights["defenseThreat"]
+        ),
         "threat": threat,
     }
 
@@ -584,10 +623,11 @@ def ordered_moves(
     limit: int = BRANCH_MOVE_LIMIT,
     radius: int = 2,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
 ) -> list[dict]:
     opponent = other_player(player)
     moves = [
-        candidate_score(board, candidate, player, opponent)
+        candidate_score(board, candidate, player, opponent, tactic_style)
         for candidate in legal_candidates(board, player, radius, forbidden_rule)
     ]
     return sorted(moves, key=lambda item: (-item["score"], -item["defense"], -item["attack"]))[:limit]
@@ -601,12 +641,17 @@ def pick_tactical(scored_moves: list[dict], predicate, reason: str) -> dict | No
     return {"row": moves[0]["row"], "col": moves[0]["col"], "reason": reason}
 
 
-def find_tactical_move(board: list[list[int]], ai_player: int, forbidden_rule: str | None = None) -> dict | None:
+def find_tactical_move(
+    board: list[list[int]],
+    ai_player: int,
+    forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
+) -> dict | None:
     human_player = other_player(ai_player)
     ai_candidates = legal_candidates(board, ai_player, 3, forbidden_rule)
     human_candidates = legal_candidates(board, human_player, 3, forbidden_rule)
-    ai_moves = [candidate_score(board, candidate, ai_player, human_player) for candidate in ai_candidates]
-    human_moves = [candidate_score(board, candidate, human_player, ai_player) for candidate in human_candidates]
+    ai_moves = [candidate_score(board, candidate, ai_player, human_player, tactic_style) for candidate in ai_candidates]
+    human_moves = [candidate_score(board, candidate, human_player, ai_player, tactic_style) for candidate in human_candidates]
 
     own_open_four = pick_tactical(ai_moves, lambda threat: threat["openFours"] > 0, "open-four")
     if own_open_four:
@@ -681,6 +726,7 @@ def forcing_moves(
     limit: int,
     vct: bool = False,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
 ) -> list[dict]:
     opponent = other_player(player)
     moves = []
@@ -688,7 +734,7 @@ def forcing_moves(
         threat = threat_summary(board, candidate["row"], candidate["col"], player)
         if not (is_vct_threat(threat) if vct else is_vcf_threat(threat)):
             continue
-        scored = candidate_score(board, candidate, player, opponent)
+        scored = candidate_score(board, candidate, player, opponent, tactic_style)
         moves.append(scored)
 
     return sorted(
@@ -725,6 +771,7 @@ def vcf_can_win(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
     position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
@@ -740,7 +787,7 @@ def vcf_can_win(
         return table[key]
 
     defender = other_player(attacker)
-    for move in forcing_moves(board, attacker, VCF_MOVE_LIMIT, vct=False, forbidden_rule=forbidden_rule):
+    for move in forcing_moves(board, attacker, VCF_MOVE_LIMIT, vct=False, forbidden_rule=forbidden_rule, tactic_style=tactic_style):
         if time.monotonic() > deadline:
             break
 
@@ -768,6 +815,7 @@ def vcf_can_win(
                         deadline,
                         table,
                         forbidden_rule,
+                        tactic_style,
                         response_hash,
                     )
                 board[response["row"]][response["col"]] = EMPTY
@@ -789,6 +837,7 @@ def vcf_move_succeeds(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
     position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
@@ -820,6 +869,7 @@ def vcf_move_succeeds(
                     deadline,
                     table,
                     forbidden_rule,
+                    tactic_style,
                     response_hash,
                 )
             board[response["row"]][response["col"]] = EMPTY
@@ -835,6 +885,7 @@ def find_vcf_move(
     max_depth: int = VCF_DEPTH,
     reason: str = "vcf",
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
     position_hash: int | None = None,
 ) -> dict | None:
     deadline = deadline if deadline is not None else time.monotonic() + FORCING_SEARCH_TIME_SECONDS
@@ -842,8 +893,8 @@ def find_vcf_move(
         return None
     position_hash = zobrist_hash(board) if position_hash is None else position_hash
     table: dict = {}
-    for move in forcing_moves(board, attacker, VCF_MOVE_LIMIT, vct=False, forbidden_rule=forbidden_rule):
-        if vcf_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule, position_hash):
+    for move in forcing_moves(board, attacker, VCF_MOVE_LIMIT, vct=False, forbidden_rule=forbidden_rule, tactic_style=tactic_style):
+        if vcf_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule, tactic_style, position_hash):
             return with_reason(move, reason)
         if time.monotonic() > deadline:
             break
@@ -857,9 +908,10 @@ def defensive_sequence_candidates(
     seed: dict | None,
     limit: int,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
 ) -> list[dict]:
     scored = [
-        candidate_score(board, candidate, defender, attacker)
+        candidate_score(board, candidate, defender, attacker, tactic_style)
         for candidate in legal_candidates(board, defender, 3, forbidden_rule)
     ]
     scored.sort(
@@ -883,6 +935,7 @@ def block_vcf_move(
     deadline: float,
     max_depth: int = VCF_DEPTH,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
 ) -> dict | None:
     if time.monotonic() > deadline:
         return None
@@ -895,6 +948,7 @@ def block_vcf_move(
         max_depth=max_depth - 2,
         reason="vcf",
         forbidden_rule=forbidden_rule,
+        tactic_style=tactic_style,
         position_hash=position_hash,
     )
     if not threat:
@@ -907,6 +961,7 @@ def block_vcf_move(
         threat,
         VCF_BLOCK_CANDIDATE_LIMIT,
         forbidden_rule,
+        tactic_style,
     )
     for move in defenses:
         if time.monotonic() > deadline:
@@ -920,6 +975,7 @@ def block_vcf_move(
             max_depth=max_depth - 2,
             reason="vcf",
             forbidden_rule=forbidden_rule,
+            tactic_style=tactic_style,
             position_hash=defense_hash,
         )
         board[move["row"]][move["col"]] = EMPTY
@@ -929,7 +985,12 @@ def block_vcf_move(
     return with_reason(defenses[0], "block-vcf") if defenses else None
 
 
-def vct_defense_moves(board: list[list[int]], attacker: int, forbidden_rule: str | None = None) -> list[dict] | None:
+def vct_defense_moves(
+    board: list[list[int]],
+    attacker: int,
+    forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
+) -> list[dict] | None:
     defender = other_player(attacker)
     if immediate_winning_moves(board, defender, forbidden_rule=forbidden_rule):
         return None
@@ -944,7 +1005,7 @@ def vct_defense_moves(board: list[list[int]], attacker: int, forbidden_rule: str
         return [response]
 
     scored = [
-        candidate_score(board, candidate, defender, attacker)
+        candidate_score(board, candidate, defender, attacker, tactic_style)
         for candidate in legal_candidates(board, defender, 3, forbidden_rule)
     ]
     scored.sort(
@@ -974,6 +1035,7 @@ def vct_can_win(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
     position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
@@ -989,7 +1051,7 @@ def vct_can_win(
         return table[key]
 
     defender = other_player(attacker)
-    for move in forcing_moves(board, attacker, VCT_MOVE_LIMIT, vct=True, forbidden_rule=forbidden_rule):
+    for move in forcing_moves(board, attacker, VCT_MOVE_LIMIT, vct=True, forbidden_rule=forbidden_rule, tactic_style=tactic_style):
         if time.monotonic() > deadline:
             break
 
@@ -1002,7 +1064,7 @@ def vct_can_win(
         if check_win_from(board, row, col, attacker):
             success = True
         else:
-            responses = vct_defense_moves(board, attacker, forbidden_rule)
+            responses = vct_defense_moves(board, attacker, forbidden_rule, tactic_style)
             if responses == []:
                 success = True
             elif responses is not None and depth >= 2:
@@ -1021,6 +1083,7 @@ def vct_can_win(
                         deadline,
                         table,
                         forbidden_rule,
+                        tactic_style,
                         response_hash,
                     )
                     board[response["row"]][response["col"]] = EMPTY
@@ -1045,6 +1108,7 @@ def vct_move_succeeds(
     deadline: float,
     table: dict,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
     position_hash: int | None = None,
 ) -> bool:
     if time.monotonic() > deadline:
@@ -1061,7 +1125,7 @@ def vct_move_succeeds(
     if check_win_from(board, row, col, attacker):
         success = True
     else:
-        responses = vct_defense_moves(board, attacker, forbidden_rule)
+        responses = vct_defense_moves(board, attacker, forbidden_rule, tactic_style)
         if responses == []:
             success = True
         elif responses is not None and depth >= 2:
@@ -1080,6 +1144,7 @@ def vct_move_succeeds(
                     deadline,
                     table,
                     forbidden_rule,
+                    tactic_style,
                     response_hash,
                 )
                 board[response["row"]][response["col"]] = EMPTY
@@ -1098,14 +1163,15 @@ def find_vct_move(
     max_depth: int = VCT_DEPTH,
     reason: str = "vct",
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
     position_hash: int | None = None,
 ) -> dict | None:
     if time.monotonic() > deadline:
         return None
     position_hash = zobrist_hash(board) if position_hash is None else position_hash
     table: dict = {}
-    for move in forcing_moves(board, attacker, VCT_MOVE_LIMIT, vct=True, forbidden_rule=forbidden_rule):
-        if vct_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule, position_hash):
+    for move in forcing_moves(board, attacker, VCT_MOVE_LIMIT, vct=True, forbidden_rule=forbidden_rule, tactic_style=tactic_style):
+        if vct_move_succeeds(board, move, attacker, max_depth, deadline, table, forbidden_rule, tactic_style, position_hash):
             return with_reason(move, reason)
         if time.monotonic() > deadline:
             break
@@ -1118,6 +1184,7 @@ def block_vct_move(
     deadline: float,
     max_depth: int = VCT_DEPTH,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
 ) -> dict | None:
     if time.monotonic() > deadline:
         return None
@@ -1130,6 +1197,7 @@ def block_vct_move(
         max_depth=max_depth - 2,
         reason="vct",
         forbidden_rule=forbidden_rule,
+        tactic_style=tactic_style,
         position_hash=position_hash,
     )
     if not threat:
@@ -1142,6 +1210,7 @@ def block_vct_move(
         threat,
         VCT_BLOCK_CANDIDATE_LIMIT,
         forbidden_rule,
+        tactic_style,
     )
     for move in defenses:
         if time.monotonic() > deadline:
@@ -1155,6 +1224,7 @@ def block_vct_move(
             max_depth=max_depth - 2,
             reason="vct",
             forbidden_rule=forbidden_rule,
+            tactic_style=tactic_style,
             position_hash=defense_hash,
         )
         board[move["row"]][move["col"]] = EMPTY
@@ -1172,18 +1242,30 @@ def best_threat_rank(board: list[list[int]], player: int, forbidden_rule: str | 
     return max((threat["rank"] for threat in threats), default=0)
 
 
-def opponent_safety_penalty(board: list[list[int]], move: dict, ai_player: int, forbidden_rule: str | None = None) -> float:
+def opponent_safety_penalty(
+    board: list[list[int]],
+    move: dict,
+    ai_player: int,
+    forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
+) -> float:
     human_player = other_player(ai_player)
+    weights = tactic_weights(tactic_style)
     board[move["row"]][move["col"]] = ai_player
     try:
         if immediate_winning_moves(board, human_player, forbidden_rule=forbidden_rule):
             return WIN_SCORE * 2
-        return best_threat_rank(board, human_player, forbidden_rule) * 0.55
+        return best_threat_rank(board, human_player, forbidden_rule) * weights["safety"]
     finally:
         board[move["row"]][move["col"]] = EMPTY
 
 
-def evaluate_board(board: list[list[int]], ai_player: int, forbidden_rule: str | None = None) -> float:
+def evaluate_board(
+    board: list[list[int]],
+    ai_player: int,
+    forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
+) -> float:
     result = get_winner(board)
     if result and result["winner"] == ai_player:
         return WIN_SCORE
@@ -1193,24 +1275,25 @@ def evaluate_board(board: list[list[int]], ai_player: int, forbidden_rule: str |
         return 0
 
     human_player = other_player(ai_player)
+    weights = tactic_weights(tactic_style)
     ai_candidates = legal_candidates(board, ai_player, 2, forbidden_rule)
     human_candidates = legal_candidates(board, human_player, 2, forbidden_rule)
     if not ai_candidates and not human_candidates:
         return 0
 
     ai_scores = sorted(
-        (candidate_score(board, item, ai_player, human_player)["score"] for item in ai_candidates),
+        (candidate_score(board, item, ai_player, human_player, tactic_style)["score"] for item in ai_candidates),
         reverse=True,
     )
     human_scores = sorted(
-        (candidate_score(board, item, human_player, ai_player)["score"] for item in human_candidates),
+        (candidate_score(board, item, human_player, ai_player, tactic_style)["score"] for item in human_candidates),
         reverse=True,
     )
 
     def weighted(scores: list[float]) -> float:
         return (scores[0] if len(scores) > 0 else 0) + (scores[1] if len(scores) > 1 else 0) * 0.38 + (scores[2] if len(scores) > 2 else 0) * 0.18
 
-    return weighted(ai_scores) - weighted(human_scores) * 1.08
+    return weighted(ai_scores) - weighted(human_scores) * weights["boardDefense"]
 
 
 def minimax(
@@ -1225,10 +1308,11 @@ def minimax(
     transposition: dict | None = None,
     settings: dict | None = None,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
     position_hash: int | None = None,
 ) -> dict:
     if time.monotonic() > deadline:
-        return {"score": evaluate_board(board, ai_player, forbidden_rule), "timedOut": True}
+        return {"score": evaluate_board(board, ai_player, forbidden_rule, tactic_style), "timedOut": True}
 
     if transposition is None:
         transposition = {}
@@ -1248,7 +1332,8 @@ def minimax(
     if board_is_full(board):
         return {"score": 0, "timedOut": False}
 
-    key = (position_hash, current_player, ai_player, depth, normalize_forbidden_rule(forbidden_rule))
+    tactic_style = normalize_tactic_style(tactic_style)
+    key = (position_hash, current_player, ai_player, depth, normalize_forbidden_rule(forbidden_rule), tactic_style)
     cached = transposition.get(key)
     if cached is not None:
         return {"score": cached, "timedOut": False}
@@ -1259,7 +1344,7 @@ def minimax(
         transposition[key] = score
         return {"score": score, "timedOut": False}
     if depth == 0:
-        score = evaluate_board(board, ai_player, forbidden_rule)
+        score = evaluate_board(board, ai_player, forbidden_rule, tactic_style)
         transposition[key] = score
         return {"score": score, "timedOut": False}
 
@@ -1269,9 +1354,10 @@ def minimax(
         current_player,
         settings["branchLimit"] if depth >= 2 else settings["leafLimit"],
         forbidden_rule=forbidden_rule,
+        tactic_style=tactic_style,
     )
     if not moves:
-        score = evaluate_board(board, ai_player, forbidden_rule)
+        score = evaluate_board(board, ai_player, forbidden_rule, tactic_style)
         transposition[key] = score
         return {"score": score, "timedOut": False}
 
@@ -1294,6 +1380,7 @@ def minimax(
             transposition,
             settings,
             forbidden_rule,
+            tactic_style,
             move_hash,
         )
         board[move["row"]][move["col"]] = EMPTY
@@ -1323,15 +1410,17 @@ def choose_alpha_beta_move(
     settings: dict | None = None,
     forbidden_rule: str | None = None,
     difficulty: str | None = None,
+    tactic_style: str | None = None,
 ) -> dict | None:
     settings = settings or get_difficulty_settings()
     difficulty = normalize_difficulty(difficulty)
     forbidden_rule = normalize_forbidden_rule(forbidden_rule)
+    tactic_style = normalize_tactic_style(tactic_style)
 
     try:
         from .native_alpha_beta import choose_alpha_beta_move_native
 
-        native_move = choose_alpha_beta_move_native(board, ai_player, difficulty, forbidden_rule)
+        native_move = choose_alpha_beta_move_native(board, ai_player, difficulty, forbidden_rule, tactic_style)
         if native_move:
             return native_move
     except Exception:
@@ -1354,10 +1443,11 @@ def choose_alpha_beta_move(
         settings["rootLimit"],
         radius=root_radius,
         forbidden_rule=forbidden_rule,
+        tactic_style=tactic_style,
     )
     if root_moves:
         for move in root_moves:
-            move["safetyPenalty"] = opponent_safety_penalty(board, move, ai_player, forbidden_rule)
+            move["safetyPenalty"] = opponent_safety_penalty(board, move, ai_player, forbidden_rule, tactic_style)
         safe_moves = [move for move in root_moves if move["safetyPenalty"] < WIN_SCORE]
         if safe_moves:
             root_moves = safe_moves
@@ -1391,6 +1481,7 @@ def choose_alpha_beta_move(
                 transposition,
                 settings,
                 forbidden_rule,
+                tactic_style,
                 move_hash,
             )
             board[move["row"]][move["col"]] = EMPTY
@@ -1421,12 +1512,14 @@ def choose_server_move(
     ai_player: int = WHITE,
     difficulty: str | None = None,
     forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
 ) -> dict | None:
     if not validate_board(board):
         raise ValueError("Invalid board.")
 
     difficulty = normalize_difficulty(difficulty)
     forbidden_rule = normalize_forbidden_rule(forbidden_rule)
+    tactic_style = normalize_tactic_style(tactic_style)
     settings = get_difficulty_settings(difficulty)
     human_player = other_player(ai_player)
     candidates = legal_candidates(board, ai_player, 2, forbidden_rule)
@@ -1449,7 +1542,7 @@ def choose_server_move(
     if human_win:
         return {**human_win, "reason": "block"}
 
-    tactical_move = find_tactical_move(board, ai_player, forbidden_rule)
+    tactical_move = find_tactical_move(board, ai_player, forbidden_rule, tactic_style)
     if tactical_move:
         return tactical_move
 
@@ -1461,6 +1554,7 @@ def choose_server_move(
             forcing_deadline,
             max_depth=settings["vcfDepth"],
             forbidden_rule=forbidden_rule,
+            tactic_style=tactic_style,
         )
         if vcf_move:
             return vcf_move
@@ -1471,6 +1565,7 @@ def choose_server_move(
             forcing_deadline,
             max_depth=settings["vcfDepth"],
             forbidden_rule=forbidden_rule,
+            tactic_style=tactic_style,
         )
         if vcf_block:
             return vcf_block
@@ -1482,6 +1577,7 @@ def choose_server_move(
                 forcing_deadline,
                 max_depth=settings["vctDepth"],
                 forbidden_rule=forbidden_rule,
+                tactic_style=tactic_style,
             )
             if vct_move:
                 return vct_move
@@ -1492,11 +1588,12 @@ def choose_server_move(
                 forcing_deadline,
                 max_depth=settings["vctDepth"],
                 forbidden_rule=forbidden_rule,
+                tactic_style=tactic_style,
             )
             if vct_block:
                 return vct_block
 
-    searched_move = choose_alpha_beta_move(board, ai_player, settings, forbidden_rule, difficulty)
+    searched_move = choose_alpha_beta_move(board, ai_player, settings, forbidden_rule, difficulty, tactic_style)
     if searched_move:
         return searched_move
 
@@ -1505,6 +1602,7 @@ def choose_server_move(
         ai_player,
         limit=1,
         forbidden_rule=forbidden_rule,
+        tactic_style=tactic_style,
     )[0]
     return {
         "row": fallback["row"],

@@ -59,6 +59,15 @@ struct Settings {
     int root_limit = 22;
 };
 
+struct StyleWeights {
+    double attack = 1.0;
+    double defense = 1.16;
+    double attack_threat = 0.24;
+    double defense_threat = 0.16;
+    double board_defense = 1.08;
+    double safety = 0.55;
+};
+
 struct SearchResult {
     double score = 0;
     bool timed_out = false;
@@ -126,6 +135,17 @@ Settings settings_for(const std::string& difficulty) {
 
 bool renju_rule(const std::string& forbidden_rule) {
     return forbidden_rule == "renju";
+}
+
+bool aggressive_style(const std::string& tactic_style) {
+    return tactic_style == "aggressive";
+}
+
+StyleWeights weights_for(const std::string& tactic_style) {
+    if (aggressive_style(tactic_style)) {
+        return {1.08, 1.02, 0.34, 0.11, 0.98, 0.43};
+    }
+    return {};
 }
 
 bool board_is_full(const Board& board) {
@@ -503,21 +523,30 @@ double score_move(const Board& board, int row, int col, int player) {
     return threat.rank + base * 0.35 + center_bonus;
 }
 
-Move candidate_score(const Board& board, Move move, int player, int defending_player) {
+Move candidate_score(const Board& board, Move move, int player, int defending_player, const std::string& tactic_style) {
+    StyleWeights weights = weights_for(tactic_style);
     Threat threat = threat_summary(board, move.row, move.col, player);
     Threat defense_threat = threat_summary(board, move.row, move.col, defending_player);
     move.attack = score_move(board, move.row, move.col, player);
     move.defense = score_move(board, move.row, move.col, defending_player);
     move.priority = threat_priority(threat);
-    move.score = move.attack + move.defense * 1.16 + threat.rank * 0.24 + defense_threat.rank * 0.16;
+    move.score = move.attack * weights.attack + move.defense * weights.defense +
+        threat.rank * weights.attack_threat + defense_threat.rank * weights.defense_threat;
     return move;
 }
 
-std::vector<Move> ordered_moves(const Board& board, int player, int limit, int radius, const std::string& forbidden_rule) {
+std::vector<Move> ordered_moves(
+    const Board& board,
+    int player,
+    int limit,
+    int radius,
+    const std::string& forbidden_rule,
+    const std::string& tactic_style
+) {
     int opponent = other_player(player);
     std::vector<Move> moves;
     for (Move move : legal_candidates(board, player, radius, forbidden_rule)) {
-        moves.push_back(candidate_score(board, move, player, opponent));
+        moves.push_back(candidate_score(board, move, player, opponent, tactic_style));
     }
     std::sort(moves.begin(), moves.end(), [](const Move& a, const Move& b) {
         if (a.score != b.score) return a.score > b.score;
@@ -538,18 +567,26 @@ double best_threat_rank(const Board& board, int player, const std::string& forbi
     return best;
 }
 
-double opponent_safety_penalty(Board& board, const Move& move, int ai_player, const std::string& forbidden_rule) {
+double opponent_safety_penalty(
+    Board& board,
+    const Move& move,
+    int ai_player,
+    const std::string& forbidden_rule,
+    const std::string& tactic_style
+) {
     int human_player = other_player(ai_player);
+    StyleWeights weights = weights_for(tactic_style);
     board[index_of(move.row, move.col)] = ai_player;
     double penalty = immediate_winning_moves(board, human_player, forbidden_rule).empty()
-        ? best_threat_rank(board, human_player, forbidden_rule) * 0.55
+        ? best_threat_rank(board, human_player, forbidden_rule) * weights.safety
         : WIN_SCORE * 2;
     board[index_of(move.row, move.col)] = EMPTY;
     return penalty;
 }
 
-double evaluate_board(Board& board, int ai_player, const std::string& forbidden_rule) {
+double evaluate_board(Board& board, int ai_player, const std::string& forbidden_rule, const std::string& tactic_style) {
     int human_player = other_player(ai_player);
+    StyleWeights weights = weights_for(tactic_style);
     if (has_win(board, ai_player)) return WIN_SCORE;
     if (has_win(board, human_player)) return -WIN_SCORE;
     if (board_is_full(board)) return 0;
@@ -562,11 +599,11 @@ double evaluate_board(Board& board, int ai_player, const std::string& forbidden_
 
     std::vector<double> ai_scores;
     for (Move move : ai_candidates) {
-        ai_scores.push_back(candidate_score(board, move, ai_player, human_player).score);
+        ai_scores.push_back(candidate_score(board, move, ai_player, human_player, tactic_style).score);
     }
     std::vector<double> human_scores;
     for (Move move : human_candidates) {
-        human_scores.push_back(candidate_score(board, move, human_player, ai_player).score);
+        human_scores.push_back(candidate_score(board, move, human_player, ai_player, tactic_style).score);
     }
     std::sort(ai_scores.begin(), ai_scores.end(), std::greater<double>());
     std::sort(human_scores.begin(), human_scores.end(), std::greater<double>());
@@ -579,15 +616,23 @@ double evaluate_board(Board& board, int ai_player, const std::string& forbidden_
         return value;
     };
 
-    return weighted(ai_scores) - weighted(human_scores) * 1.08;
+    return weighted(ai_scores) - weighted(human_scores) * weights.board_defense;
 }
 
-std::uint64_t mix_key(std::uint64_t hash, int current_player, int ai_player, int depth, const std::string& forbidden_rule) {
+std::uint64_t mix_key(
+    std::uint64_t hash,
+    int current_player,
+    int ai_player,
+    int depth,
+    const std::string& forbidden_rule,
+    const std::string& tactic_style
+) {
     std::uint64_t key = hash;
     key ^= splitmix64(static_cast<std::uint64_t>(current_player) + 0x1000ULL);
     key ^= splitmix64(static_cast<std::uint64_t>(ai_player) + 0x2000ULL);
     key ^= splitmix64(static_cast<std::uint64_t>(depth) + 0x3000ULL);
     key ^= splitmix64(renju_rule(forbidden_rule) ? 0x4001ULL : 0x4000ULL);
+    key ^= splitmix64(aggressive_style(tactic_style) ? 0x5001ULL : 0x5000ULL);
     return key;
 }
 
@@ -602,13 +647,14 @@ SearchResult minimax(
     std::unordered_map<std::uint64_t, double>& transposition,
     const Settings& settings,
     const std::string& forbidden_rule,
+    const std::string& tactic_style,
     std::uint64_t position_hash,
     int last_row,
     int last_col,
     int last_player
 ) {
     if (Clock::now() > deadline) {
-        return {evaluate_board(board, ai_player, forbidden_rule), true};
+        return {evaluate_board(board, ai_player, forbidden_rule, tactic_style), true};
     }
 
     if (last_player != EMPTY && check_win_from(board, last_row, last_col, last_player)) {
@@ -621,7 +667,7 @@ SearchResult minimax(
         return {0, false};
     }
 
-    std::uint64_t key = mix_key(position_hash, current_player, ai_player, depth, forbidden_rule);
+    std::uint64_t key = mix_key(position_hash, current_player, ai_player, depth, forbidden_rule, tactic_style);
     auto cached = transposition.find(key);
     if (cached != transposition.end()) {
         return {cached->second, false};
@@ -635,16 +681,16 @@ SearchResult minimax(
     }
 
     if (depth == 0) {
-        double score = evaluate_board(board, ai_player, forbidden_rule);
+        double score = evaluate_board(board, ai_player, forbidden_rule, tactic_style);
         transposition[key] = score;
         return {score, false};
     }
 
     bool maximizing = current_player == ai_player;
     int limit = depth >= 2 ? settings.branch_limit : settings.leaf_limit;
-    std::vector<Move> moves = ordered_moves(board, current_player, limit, 2, forbidden_rule);
+    std::vector<Move> moves = ordered_moves(board, current_player, limit, 2, forbidden_rule, tactic_style);
     if (moves.empty()) {
-        double score = evaluate_board(board, ai_player, forbidden_rule);
+        double score = evaluate_board(board, ai_player, forbidden_rule, tactic_style);
         transposition[key] = score;
         return {score, false};
     }
@@ -670,6 +716,7 @@ SearchResult minimax(
             transposition,
             settings,
             forbidden_rule,
+            tactic_style,
             next_hash,
             move.row,
             move.col,
@@ -701,7 +748,13 @@ SearchResult minimax(
     return {best_score, timed_out};
 }
 
-std::string choose_alpha_beta(Board& board, int ai_player, const std::string& difficulty, const std::string& forbidden_rule) {
+std::string choose_alpha_beta(
+    Board& board,
+    int ai_player,
+    const std::string& difficulty,
+    const std::string& forbidden_rule,
+    const std::string& tactic_style
+) {
     Settings settings = settings_for(difficulty);
     Deadline deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
         std::chrono::duration<double>(settings.search_time)
@@ -712,13 +765,20 @@ std::string choose_alpha_beta(Board& board, int ai_player, const std::string& di
         best_threat_rank(board, human_player, forbidden_rule)
     );
     int root_radius = threat_rank >= 500'000.0 ? 3 : 2;
-    std::vector<Move> root_moves = ordered_moves(board, ai_player, settings.root_limit, root_radius, forbidden_rule);
+    std::vector<Move> root_moves = ordered_moves(
+        board,
+        ai_player,
+        settings.root_limit,
+        root_radius,
+        forbidden_rule,
+        tactic_style
+    );
     if (root_moves.empty()) {
         return "NONE\n";
     }
 
     for (Move& move : root_moves) {
-        move.safety_penalty = opponent_safety_penalty(board, move, ai_player, forbidden_rule);
+        move.safety_penalty = opponent_safety_penalty(board, move, ai_player, forbidden_rule, tactic_style);
     }
     std::vector<Move> safe_moves;
     for (const Move& move : root_moves) {
@@ -761,6 +821,7 @@ std::string choose_alpha_beta(Board& board, int ai_player, const std::string& di
                 transposition,
                 settings,
                 forbidden_rule,
+                tactic_style,
                 move_hash,
                 move.row,
                 move.col,
@@ -797,7 +858,8 @@ int main() {
     int ai_player = WHITE;
     std::string difficulty = "expert";
     std::string forbidden_rule = "none";
-    if (!(std::cin >> ai_player >> difficulty >> forbidden_rule)) {
+    std::string tactic_style = "defensive";
+    if (!(std::cin >> ai_player >> difficulty >> forbidden_rule >> tactic_style)) {
         std::cout << "NONE\n";
         return 0;
     }
@@ -819,6 +881,6 @@ int main() {
         board[i] = cell - '0';
     }
 
-    std::cout << choose_alpha_beta(board, ai_player, difficulty, forbidden_rule);
+    std::cout << choose_alpha_beta(board, ai_player, difficulty, forbidden_rule, tactic_style);
     return 0;
 }

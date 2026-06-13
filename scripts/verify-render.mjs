@@ -53,6 +53,7 @@ async function sample(page) {
       retryText: document.querySelector('#retry-button').textContent.trim(),
       selectedDifficulty: document.querySelector('[data-option="difficulty"].is-selected')?.dataset.value ?? '',
       selectedForbiddenRule: document.querySelector('[data-option="forbiddenRule"].is-selected')?.dataset.value ?? '',
+      selectedTacticStyle: document.querySelector('[data-option="tacticStyle"].is-selected')?.dataset.value ?? '',
       settingsButtonBackground: getComputedStyle(document.querySelector('#settings-button')).backgroundColor,
       settingsButtonBorderWidth: getComputedStyle(document.querySelector('#settings-button')).borderTopWidth,
       settingsButtonOpacity: getComputedStyle(document.querySelector('#settings-button')).opacity,
@@ -63,6 +64,38 @@ async function sample(page) {
       status: document.querySelector('#micro-status').textContent,
       statusHidden: document.querySelector('#micro-status').classList.contains('hidden'),
     };
+  });
+}
+
+async function pinchZoom(page) {
+  await page.evaluate(() => {
+    const canvas = document.querySelector('#scene');
+    const rect = canvas.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    function fire(type, pointerId, x, y) {
+      canvas.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          button: 0,
+          buttons: type === 'pointerup' ? 0 : 1,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          isPrimary: pointerId === 41,
+          pointerId,
+          pointerType: 'touch',
+        }),
+      );
+    }
+
+    fire('pointerdown', 41, centerX - 42, centerY);
+    fire('pointerdown', 42, centerX + 42, centerY);
+    fire('pointermove', 41, centerX - 122, centerY);
+    fire('pointermove', 42, centerX + 122, centerY);
+    fire('pointerup', 41, centerX - 122, centerY);
+    fire('pointerup', 42, centerX + 122, centerY);
   });
 }
 
@@ -98,9 +131,15 @@ await page.waitForTimeout(1400);
 const started = await sample(page);
 await page.screenshot({ path: screenshotPath('started'), fullPage: false });
 
+await pinchZoom(page);
+await page.waitForTimeout(500);
+const pinched = await sample(page);
+await page.screenshot({ path: screenshotPath('pinched'), fullPage: false });
+
 await page.click('#settings-button');
 await page.click('[data-option="difficulty"][data-value="hard"]');
 await page.click('[data-option="forbiddenRule"][data-value="renju"]');
+await page.click('[data-option="tacticStyle"][data-value="aggressive"]');
 await page.waitForTimeout(400);
 const optionsOpen = await sample(page);
 const cachedOptions = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}'), optionsStorageKey);
@@ -124,18 +163,32 @@ const reloaded = await sample(page);
 const randomSession = await apiState(page);
 await browser.close();
 
-const result = { afterClick, cachedOptions, errors, initial, optionsOpen, randomSession, reloaded, screenshots, started };
+const result = {
+  afterClick,
+  cachedOptions,
+  errors,
+  initial,
+  optionsOpen,
+  pinched,
+  randomSession,
+  reloaded,
+  screenshots,
+  started,
+};
 console.log(JSON.stringify(result, null, 2));
 
 if (
   errors.length ||
   !started.appClass.includes('is-started') ||
   started.lit < 4 ||
+  pinched.checksum === started.checksum ||
   started.heroVisible > 0.2 ||
   started.retryText !== '다시하기' ||
   !started.resultHidden ||
   initial.selectedForbiddenRule !== 'none' ||
+  initial.selectedTacticStyle !== 'defensive' ||
   started.selectedForbiddenRule !== 'none' ||
+  started.selectedTacticStyle !== 'defensive' ||
   Number(initial.settingsButtonOpacity) > 0.1 ||
   Number(started.settingsButtonOpacity) < 0.8 ||
   started.settingsButtonBackground !== 'rgba(0, 0, 0, 0)' ||
@@ -146,11 +199,15 @@ if (
   optionsOpen.settingsButtonTransform !== 'none' ||
   optionsOpen.selectedDifficulty !== 'hard' ||
   optionsOpen.selectedForbiddenRule !== 'renju' ||
+  optionsOpen.selectedTacticStyle !== 'aggressive' ||
   cachedOptions.difficulty !== 'hard' ||
   cachedOptions.forbiddenRule !== 'renju' ||
+  cachedOptions.tacticStyle !== 'aggressive' ||
   reloaded.selectedDifficulty !== 'hard' ||
   reloaded.selectedForbiddenRule !== 'renju' ||
+  reloaded.selectedTacticStyle !== 'aggressive' ||
   randomSession.options?.forbiddenRule !== 'none' ||
+  randomSession.options?.tacticStyle !== 'defensive' ||
   randomSession.humanPlayer !== 1 && randomSession.humanPlayer !== 2 ||
   randomSession.serverPlayer !== 1 && randomSession.serverPlayer !== 2 ||
   randomSession.humanPlayer === randomSession.serverPlayer ||

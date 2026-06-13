@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
 from app.gomoku_engine import (
     BLACK,
     DEFAULT_FORBIDDEN_RULE,
+    DEFAULT_TACTIC_STYLE,
     WHITE,
     check_win_from,
     classify_line_pattern,
@@ -17,6 +18,7 @@ from app.gomoku_engine import (
     get_winner,
     is_forbidden_move,
     normalize_forbidden_rule,
+    normalize_tactic_style,
     place_move,
     zobrist_hash,
     zobrist_value,
@@ -57,6 +59,8 @@ assert_move(
 place_move(board, 7, 7, BLACK)
 first_server_move = choose_server_move(board, WHITE)
 assert_true(first_server_move and isinstance(first_server_move["row"], int), "AI did not return a move.")
+aggressive_server_move = choose_server_move(board, WHITE, tactic_style="aggressive")
+assert_true(aggressive_server_move and isinstance(aggressive_server_move["row"], int), "Aggressive AI did not return a move.")
 
 attack_board = create_board()
 for col in range(3, 7):
@@ -129,8 +133,11 @@ forbidden_board = create_board()
 for row, col in ((7, 5), (7, 6), (5, 7), (6, 7)):
     place_move(forbidden_board, row, col, BLACK)
 assert_true(DEFAULT_FORBIDDEN_RULE == "none", "Forbidden rule should default to free rule.")
+assert_true(DEFAULT_TACTIC_STYLE == "defensive", "Tactic style should default to defensive.")
 assert_true(normalize_forbidden_rule(None) == "none", "Missing forbidden rule did not normalize to free rule.")
 assert_true(normalize_forbidden_rule("none") == "none", "Forbidden rule off option did not normalize.")
+assert_true(normalize_tactic_style(None) == "defensive", "Missing tactic style did not normalize.")
+assert_true(normalize_tactic_style("aggressive") == "aggressive", "Aggressive tactic style did not normalize.")
 assert_true(is_forbidden_move(forbidden_board, 7, 7, BLACK, "renju"), "Double-three forbidden move failed.")
 forbidden_ai_move = choose_server_move(forbidden_board, BLACK, forbidden_rule="renju")
 assert_true(
