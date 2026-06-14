@@ -83,16 +83,19 @@ def make_server_move(session: dict[str, Any]) -> None:
         return
 
     place_move(session["board"], server_move["row"], server_move["col"], session["serverPlayer"])
-    session["history"].append(
-        {
-            "player": session["serverPlayer"],
-            "reason": server_move["reason"],
-            "row": server_move["row"],
-            "col": server_move["col"],
-            "source": "server",
-            "notation": serialize_move(server_move),
-        }
-    )
+    history_entry = {
+        "player": session["serverPlayer"],
+        "reason": server_move["reason"],
+        "row": server_move["row"],
+        "col": server_move["col"],
+        "source": "server",
+        "notation": serialize_move(server_move),
+    }
+    if server_move.get("explanation"):
+        history_entry["explanation"] = server_move["explanation"]
+    if server_move.get("decision"):
+        history_entry["decision"] = server_move["decision"]
+    session["history"].append(history_entry)
     finish_if_needed(session)
 
 

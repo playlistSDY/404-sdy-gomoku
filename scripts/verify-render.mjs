@@ -162,7 +162,7 @@ const pinched = await sample(page);
 await page.screenshot({ path: screenshotPath('pinched'), fullPage: false });
 
 await page.click('#settings-button');
-await page.click('[data-option="difficulty"][data-value="hard"]');
+await page.click('[data-option="difficulty"][data-value="easy"]');
 await page.click('[data-option="forbiddenRule"][data-value="renju"]');
 await page.click('[data-option="tacticStyle"][data-value="aggressive"]');
 await page.click('[data-option="humanPlayer"][data-value="black"]');
@@ -236,14 +236,14 @@ if (
   started.settingsIconSrc !== expectedSettingsIconUrl ||
   optionsOpen.settingsPanelHidden ||
   optionsOpen.settingsButtonTransform !== 'none' ||
-  optionsOpen.selectedDifficulty !== 'hard' ||
+  optionsOpen.selectedDifficulty !== 'easy' ||
   optionsOpen.selectedForbiddenRule !== 'renju' ||
   optionsOpen.selectedHumanPlayer !== 'black' ||
   optionsOpen.selectedTacticStyle !== 'aggressive' ||
   optionsOpen.sideRestartHintHidden ||
   optionsOpen.sideRestartHintTag !== 'P' ||
   optionsOpen.sideRestartHintText !== '재시작 시 적용됩니다.' ||
-  cachedOptions.difficulty !== 'hard' ||
+  cachedOptions.difficulty !== 'easy' ||
   cachedOptions.forbiddenRule !== 'renju' ||
   cachedOptions.humanPlayer !== 'black' ||
   cachedOptions.tacticStyle !== 'aggressive' ||
@@ -253,7 +253,7 @@ if (
   !afterSettingsRestart.openingSwapHidden ||
   !afterSettingsRestart.settingsPanelHidden ||
   afterClick.debug?.historyLength < 2 ||
-  reloaded.selectedDifficulty !== 'hard' ||
+  reloaded.selectedDifficulty !== 'easy' ||
   reloaded.selectedForbiddenRule !== 'renju' ||
   reloaded.selectedHumanPlayer !== 'black' ||
   reloaded.selectedTacticStyle !== 'aggressive' ||

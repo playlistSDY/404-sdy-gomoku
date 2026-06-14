@@ -22,6 +22,8 @@ def native_binary_path() -> Path | None:
 
 
 def native_timeout(difficulty: str) -> float:
+    if difficulty == "easy":
+        return 0.55
     if difficulty == "normal":
         return 0.9
     if difficulty == "hard":
@@ -64,7 +66,7 @@ def choose_alpha_beta_move_native(
     if not line or line[0] == "NONE":
         return None
 
-    parts = line[0].split(maxsplit=2)
+    parts = line[0].split()
     if len(parts) < 2:
         return None
 
@@ -77,8 +79,17 @@ def choose_alpha_beta_move_native(
     if not (0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE):
         return None
 
-    return {
+    move = {
         "row": row,
         "col": col,
         "reason": parts[2] if len(parts) > 2 else "search-native",
     }
+    if len(parts) > 3:
+        try:
+            move["decision"] = {
+                "mode": "native-alpha-beta",
+                "searchScore": round(float(parts[3]), 2),
+            }
+        except ValueError:
+            pass
+    return move

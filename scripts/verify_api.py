@@ -10,6 +10,7 @@ from app.gomoku_engine import (
     DEFAULT_FORBIDDEN_RULE,
     DEFAULT_TACTIC_STYLE,
     WHITE,
+    attach_move_decision,
     check_win_from,
     classify_line_pattern,
     choose_server_move,
@@ -45,6 +46,11 @@ assert_true(
 board[7][7] = 0
 
 assert_true(get_difficulty_settings("expert")["depths"][-1] == 5, "Expert search did not attempt depth 5.")
+assert_true(get_difficulty_settings("easy")["depths"] == (1,), "Easy search should only use depth 1.")
+assert_true(
+    get_difficulty_settings("easy")["useTactical"] is False,
+    "Easy difficulty should skip tactical pre-search.",
+)
 empty_opening = choose_server_move(board, BLACK)
 assert_move(empty_opening, 7, 7, "AI did not open at the center on an empty board.")
 
@@ -60,6 +66,43 @@ assert_move(
 place_move(board, 7, 7, BLACK)
 first_server_move = choose_server_move(board, WHITE)
 assert_true(first_server_move and isinstance(first_server_move["row"], int), "AI did not return a move.")
+assert_true(
+    first_server_move.get("decision", {}).get("mode") == "common-score",
+    "Regular AI move did not include common score details.",
+)
+easy_response_board = create_board()
+place_move(easy_response_board, 7, 7, BLACK)
+place_move(easy_response_board, 6, 6, WHITE)
+easy_response = choose_server_move(easy_response_board, BLACK, difficulty="easy")
+assert_true(easy_response["reason"] == "easy", "Easy difficulty did not use the easy move selector.")
+assert_true(bool(easy_response.get("explanation")), "Easy difficulty did not include a simple-choice explanation.")
+assert_true(easy_response.get("decision", {}).get("mode") == "easy", "Easy difficulty did not include decision details.")
+assert_true(
+    easy_response.get("decision", {}).get("commonScore", {}).get("mode") == "common-score",
+    "Easy difficulty did not include common score details.",
+)
+
+reason_alignment_board = create_board()
+place_move(reason_alignment_board, 7, 5, BLACK)
+place_move(reason_alignment_board, 7, 6, BLACK)
+place_move(reason_alignment_board, 6, 6, WHITE)
+aligned_move = attach_move_decision(
+    reason_alignment_board,
+    {"row": 7, "col": 7, "reason": "defend-native"},
+    BLACK,
+    WHITE,
+    "normal",
+    "renju",
+    "aggressive",
+)
+assert_true(
+    aligned_move["reason"] == "search-native",
+    "Search reason did not align with common attack/defense score signals.",
+)
+assert_true(
+    aligned_move["decision"]["rawReason"] == "defend-native",
+    "Common score did not preserve the raw search reason.",
+)
 aggressive_server_move = choose_server_move(board, WHITE, tactic_style="aggressive")
 assert_true(aggressive_server_move and isinstance(aggressive_server_move["row"], int), "Aggressive AI did not return a move.")
 

@@ -124,6 +124,9 @@ std::uint64_t zobrist_hash(const Board& board) {
 }
 
 Settings settings_for(const std::string& difficulty) {
+    if (difficulty == "easy") {
+        return {{1}, 0.18, 5, 8, 8};
+    }
     if (difficulty == "normal") {
         return {{2}, 0.36, 7, 10, 12};
     }
@@ -847,7 +850,7 @@ std::string choose_alpha_beta(
     }
 
     std::string reason = best_score >= 0 ? "search-native" : "defend-native";
-    return std::to_string(best_move.row) + " " + std::to_string(best_move.col) + " " + reason + "\n";
+    return std::to_string(best_move.row) + " " + std::to_string(best_move.col) + " " + reason + " " + std::to_string(best_score) + "\n";
 }
 
 }  // namespace

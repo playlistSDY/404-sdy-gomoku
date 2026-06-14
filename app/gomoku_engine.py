@@ -26,6 +26,19 @@ DEFAULT_DIFFICULTY = "expert"
 DEFAULT_FORBIDDEN_RULE = "none"
 DEFAULT_TACTIC_STYLE = "defensive"
 DIFFICULTY_SETTINGS = {
+    "easy": {
+        "branchLimit": 5,
+        "depths": (1,),
+        "forcingTime": 0.0,
+        "leafLimit": 8,
+        "rootLimit": 8,
+        "searchTime": 0.18,
+        "useTactical": False,
+        "useVcf": False,
+        "useVct": False,
+        "vcfDepth": 0,
+        "vctDepth": 0,
+    },
     "normal": {
         "branchLimit": 7,
         "depths": (2,),
@@ -33,6 +46,7 @@ DIFFICULTY_SETTINGS = {
         "leafLimit": 10,
         "rootLimit": 12,
         "searchTime": 0.36,
+        "useTactical": True,
         "useVcf": False,
         "useVct": False,
         "vcfDepth": 0,
@@ -45,6 +59,7 @@ DIFFICULTY_SETTINGS = {
         "leafLimit": 14,
         "rootLimit": 18,
         "searchTime": 0.78,
+        "useTactical": True,
         "useVcf": True,
         "useVct": False,
         "vcfDepth": 8,
@@ -57,6 +72,7 @@ DIFFICULTY_SETTINGS = {
         "leafLimit": LEAF_MOVE_LIMIT,
         "rootLimit": ROOT_MOVE_LIMIT,
         "searchTime": SEARCH_TIME_SECONDS,
+        "useTactical": True,
         "useVcf": True,
         "useVct": True,
         "vcfDepth": VCF_DEPTH,
@@ -1518,6 +1534,199 @@ def choose_alpha_beta_move(
     }
 
 
+def easy_roll(board: list[list[int]], salt: int, modulo: int) -> int:
+    if modulo <= 1:
+        return 0
+    return (zobrist_hash(board) ^ splitmix64(salt)) % modulo
+
+
+def easy_shape_score(board: list[list[int]], row: int, col: int, player: int) -> float:
+    total = 0
+    for dr, dc in DIRECTIONS:
+        run = directional_run(board, row, col, player, dr, dc)
+        total += (run["length"] ** 2) * 36 + run["openEnds"] * 14
+
+    center = (BOARD_SIZE - 1) / 2
+    center_distance = abs(row - center) + abs(col - center)
+    return total + max(0, 12 - center_distance) * 5
+
+
+def choose_easy_move(
+    board: list[list[int]],
+    ai_player: int,
+    immediate_block: dict | None = None,
+    forbidden_rule: str | None = None,
+) -> dict | None:
+    candidates = legal_candidates(board, ai_player, 2, forbidden_rule)
+    if not candidates:
+        return None
+
+    if immediate_block and easy_roll(board, 41, 100) < 55:
+        return {
+            **immediate_block,
+            "reason": "block-easy",
+            "explanation": "상대가 다음 수에 바로 이길 수 있는 자리라서, 쉬움 난이도 판정에서 이번에는 방어를 선택했습니다.",
+            "decision": {
+                "mode": "easy",
+                "blockChancePercent": 55,
+                "target": "opponent-immediate-win",
+            },
+        }
+
+    human_player = other_player(ai_player)
+    scored = []
+    for candidate in candidates:
+        row = candidate["row"]
+        col = candidate["col"]
+        jitter = easy_roll(board, row * 31 + col * 17 + ai_player * 13, 39) - 19
+        attack_shape = easy_shape_score(board, row, col, ai_player)
+        defense_shape = easy_shape_score(board, row, col, human_player)
+        scored.append(
+            {
+                **candidate,
+                "attackShape": attack_shape,
+                "defenseShape": defense_shape,
+                "jitter": jitter,
+                "score": attack_shape + defense_shape * 0.18 + jitter * 4,
+            }
+        )
+
+    scored.sort(key=lambda move: move["score"], reverse=True)
+    pool = scored[1:6] if len(scored) >= 4 else scored[: min(4, len(scored))]
+    if not pool:
+        pool = scored[:1]
+    move = pool[easy_roll(board, 97, len(pool))]
+    candidate_rank = scored.index(move) + 1
+    pool_label = "2~6위 후보" if len(scored) >= 4 else "가능 후보"
+    return {
+        "row": move["row"],
+        "col": move["col"],
+        "reason": "easy",
+        "explanation": (
+            f"쉬움 난이도라 깊은 탐색 없이 {pool_label} 중 하나를 골랐습니다. "
+            f"내 연결 점수 {move['attackShape']:.1f}, 상대 방해 점수 {move['defenseShape']:.1f}, "
+            f"랜덤 보정 {move['jitter'] * 4:+.1f}를 합산했습니다."
+        ),
+        "decision": {
+            "mode": "easy",
+            "candidateRank": candidate_rank,
+            "candidateCount": len(scored),
+            "pool": pool_label,
+            "attackShape": round(move["attackShape"], 2),
+            "defenseShape": round(move["defenseShape"], 2),
+            "defenseWeight": 0.18,
+            "randomAdjustment": move["jitter"] * 4,
+            "score": round(move["score"], 2),
+        },
+    }
+
+
+def compact_threat(threat: dict) -> dict:
+    return {
+        "rank": round(threat["rank"], 2),
+        "directFive": threat["directFive"],
+        "openFours": threat["openFours"],
+        "fours": threat["fours"],
+        "openThrees": threat["openThrees"],
+        "brokenThrees": threat["brokenThrees"],
+        "doubleFour": threat["doubleFour"],
+        "fourThree": threat["fourThree"],
+        "doubleThree": threat["doubleThree"],
+        "forcing": threat["forcing"],
+    }
+
+
+def score_intent(common_score: dict) -> dict:
+    attack_signal = common_score["weightedAttack"] + common_score["attackThreatBonus"]
+    defense_signal = common_score["weightedDefense"] + common_score["defenseThreatBonus"]
+    return {
+        "attackSignal": round(attack_signal, 2),
+        "defenseSignal": round(defense_signal, 2),
+        "intent": "defense" if defense_signal > attack_signal else "attack",
+    }
+
+
+def align_search_reason(reason: str | None, intent: str) -> str | None:
+    if reason not in {"search", "defend", "search-native", "defend-native"}:
+        return reason
+    if reason.endswith("-native"):
+        return "defend-native" if intent == "defense" else "search-native"
+    return "defend" if intent == "defense" else "search"
+
+
+def attach_move_decision(
+    board: list[list[int]],
+    move: dict | None,
+    ai_player: int,
+    human_player: int,
+    difficulty: str,
+    forbidden_rule: str | None = None,
+    tactic_style: str | None = None,
+) -> dict | None:
+    if not move:
+        return None
+
+    row = move["row"]
+    col = move["col"]
+    if not is_inside(row, col) or board[row][col] != EMPTY:
+        return move
+
+    weights = tactic_weights(tactic_style)
+    original_reason = move.get("reason")
+    scored = candidate_score(board, {"row": row, "col": col}, ai_player, human_player, tactic_style)
+    scored_candidates = [
+        candidate_score(board, candidate, ai_player, human_player, tactic_style)
+        for candidate in legal_candidates(board, ai_player, 3, forbidden_rule)
+    ]
+    scored_candidates.sort(key=lambda item: (-item["score"], -item["defense"], -item["attack"]))
+    candidate_rank = next(
+        (
+            index + 1
+            for index, candidate in enumerate(scored_candidates)
+            if candidate["row"] == row and candidate["col"] == col
+        ),
+        None,
+    )
+    common_score = {
+        "mode": "common-score",
+        "difficulty": difficulty,
+        "totalScore": round(scored["score"], 2),
+        "attackScore": round(scored["attack"], 2),
+        "defenseScore": round(scored["defense"], 2),
+        "weightedAttack": round(scored["attack"] * weights["attack"], 2),
+        "weightedDefense": round(scored["defense"] * weights["defense"], 2),
+        "attackThreatBonus": round(scored["threat"]["rank"] * weights["attackThreat"], 2),
+        "defenseThreatBonus": round(scored["defenseThreat"]["rank"] * weights["defenseThreat"], 2),
+        "priority": scored["priority"],
+        "candidateRank": candidate_rank,
+        "candidateCount": len(scored_candidates),
+        "attackThreat": compact_threat(scored["threat"]),
+        "defenseThreat": compact_threat(scored["defenseThreat"]),
+    }
+    intent = score_intent(common_score)
+    common_score = {
+        **common_score,
+        **intent,
+        "rawReason": original_reason,
+    }
+
+    decision = move.get("decision")
+    if isinstance(decision, dict) and decision:
+        decision = {**decision, "commonScore": common_score}
+    else:
+        decision = common_score
+
+    explanation = move.get("explanation") or (
+        f"공통 평가 점수 {common_score['totalScore']:.2f}점입니다. "
+        f"공격 원점수 {common_score['attackScore']:.2f}, 방어 원점수 {common_score['defenseScore']:.2f}, "
+        f"가중 공격 {common_score['weightedAttack']:.2f}, 가중 방어 {common_score['weightedDefense']:.2f}, "
+        f"공격 위협 보너스 {common_score['attackThreatBonus']:.2f}, "
+        f"방어 위협 보너스 {common_score['defenseThreatBonus']:.2f}를 기준으로 판단했습니다."
+    )
+    reason = align_search_reason(original_reason, common_score["intent"])
+    return {**move, "reason": reason, "decision": decision, "explanation": explanation}
+
+
 def choose_server_move(
     board: list[list[int]],
     ai_player: int = WHITE,
@@ -1533,29 +1742,37 @@ def choose_server_move(
     tactic_style = normalize_tactic_style(tactic_style)
     settings = get_difficulty_settings(difficulty)
     human_player = other_player(ai_player)
+
+    def finalize(move: dict | None) -> dict | None:
+        return attach_move_decision(board, move, ai_player, human_player, difficulty, forbidden_rule, tactic_style)
+
     candidates = legal_candidates(board, ai_player, 2, forbidden_rule)
     if not candidates:
         return None
 
     opening = opening_move(board, candidates)
     if opening:
-        return opening
+        return finalize(opening)
 
     human_candidates = legal_candidates(board, human_player, 2, forbidden_rule)
     ai_win = next((candidate for candidate in candidates if winning_move(board, candidate, ai_player, forbidden_rule)), None)
     if ai_win:
-        return {**ai_win, "reason": "finish"}
+        return finalize({**ai_win, "reason": "finish"})
 
     human_win = next(
         (candidate for candidate in human_candidates if winning_move(board, candidate, human_player, forbidden_rule)),
         None,
     )
-    if human_win:
-        return {**human_win, "reason": "block"}
+    if difficulty == "easy":
+        return finalize(choose_easy_move(board, ai_player, human_win, forbidden_rule))
 
-    tactical_move = find_tactical_move(board, ai_player, forbidden_rule, tactic_style)
-    if tactical_move:
-        return tactical_move
+    if human_win:
+        return finalize({**human_win, "reason": "block"})
+
+    if settings.get("useTactical", True):
+        tactical_move = find_tactical_move(board, ai_player, forbidden_rule, tactic_style)
+        if tactical_move:
+            return finalize(tactical_move)
 
     if settings["useVcf"] and settings["forcingTime"] > 0:
         forcing_deadline = time.monotonic() + settings["forcingTime"]
@@ -1568,7 +1785,7 @@ def choose_server_move(
             tactic_style=tactic_style,
         )
         if vcf_move:
-            return vcf_move
+            return finalize(vcf_move)
 
         vcf_block = block_vcf_move(
             board,
@@ -1579,7 +1796,7 @@ def choose_server_move(
             tactic_style=tactic_style,
         )
         if vcf_block:
-            return vcf_block
+            return finalize(vcf_block)
 
         if settings["useVct"]:
             vct_move = find_vct_move(
@@ -1591,7 +1808,7 @@ def choose_server_move(
                 tactic_style=tactic_style,
             )
             if vct_move:
-                return vct_move
+                return finalize(vct_move)
 
             vct_block = block_vct_move(
                 board,
@@ -1602,11 +1819,11 @@ def choose_server_move(
                 tactic_style=tactic_style,
             )
             if vct_block:
-                return vct_block
+                return finalize(vct_block)
 
     searched_move = choose_alpha_beta_move(board, ai_player, settings, forbidden_rule, difficulty, tactic_style)
     if searched_move:
-        return searched_move
+        return finalize(searched_move)
 
     fallback = ordered_moves(
         board,
@@ -1615,11 +1832,11 @@ def choose_server_move(
         forbidden_rule=forbidden_rule,
         tactic_style=tactic_style,
     )[0]
-    return {
+    return finalize({
         "row": fallback["row"],
         "col": fallback["col"],
         "reason": "counter" if fallback["defense"] > fallback["attack"] else "pressure",
-    }
+    })
 
 
 def serialize_move(move: dict) -> str:

@@ -21,7 +21,7 @@ const DEFAULT_OPTIONS = {
 };
 const OPTIONS_STORAGE_KEY = 'gomoku-404-options';
 const OPTION_VALUES = {
-  difficulty: new Set(['normal', 'hard', 'expert']),
+  difficulty: new Set(['easy', 'normal', 'hard', 'expert']),
   forbiddenRule: new Set(['none', 'renju']),
   humanPlayer: new Set(['white', 'black', 'random']),
   tacticStyle: new Set(['defensive', 'aggressive']),
@@ -204,7 +204,8 @@ app.innerHTML = `
   <section class="settings-panel hidden" id="settings-panel" aria-label="옵션">
     <div class="settings-row">
       <span class="settings-label">난이도</span>
-      <div class="segmented-control" role="group" aria-label="난이도">
+      <div class="segmented-control is-four" role="group" aria-label="난이도">
+        <button type="button" data-option="difficulty" data-value="easy">쉬움</button>
         <button type="button" data-option="difficulty" data-value="normal">보통</button>
         <button type="button" data-option="difficulty" data-value="hard">강함</button>
         <button type="button" data-option="difficulty" data-value="expert">전문가</button>
@@ -398,6 +399,88 @@ const materials = {
 };
 
 const forbiddenBarGeometry = new THREE.BoxGeometry(0.46, 0.026, 0.06);
+const SERVER_REASON_TEXT = {
+  opening: {
+    title: '초반 배치',
+    detail: '초반 수순이라 중앙 또는 중앙 근처를 우선했습니다.',
+  },
+  finish: {
+    title: '즉시 승리',
+    detail: '이 위치에 두면 바로 5목이 완성되어 선택했습니다.',
+  },
+  block: {
+    title: '즉시 방어',
+    detail: '상대가 다음 수에 이길 수 있는 자리를 막았습니다.',
+  },
+  'open-four': {
+    title: '열린4 만들기',
+    detail: '한쪽을 막아도 다음 위협이 이어지는 열린4를 만들었습니다.',
+  },
+  'block-open-four': {
+    title: '열린4 방어',
+    detail: '상대의 열린4 위협을 최우선으로 막았습니다.',
+  },
+  force: {
+    title: '강제 위협',
+    detail: '쌍사 또는 4-3처럼 상대가 한 번에 모두 막기 어려운 위협을 만들었습니다.',
+  },
+  contain: {
+    title: '강제 위협 방어',
+    detail: '상대의 쌍삼, 쌍사, 4-3 계열 위협을 억제했습니다.',
+  },
+  'double-three': {
+    title: '쌍삼 만들기',
+    detail: '두 방향의 열린3 위협을 동시에 만들 수 있는 수를 골랐습니다.',
+  },
+  vcf: {
+    title: 'VCF 공격',
+    detail: '연속 4 위협으로 승리까지 이어질 수 있는 수순을 찾았습니다.',
+  },
+  'block-vcf': {
+    title: 'VCF 방어',
+    detail: '상대의 연속 4 위협 수순을 차단하는 수를 선택했습니다.',
+  },
+  vct: {
+    title: 'VCT 공격',
+    detail: '열린3과 4 위협을 연속으로 이어가는 강제 수순을 찾았습니다.',
+  },
+  'block-vct': {
+    title: 'VCT 방어',
+    detail: '상대의 연속 위협 수순을 막는 방어 수를 선택했습니다.',
+  },
+  search: {
+    title: '탐색 선택',
+    detail: '알파베타 탐색 결과와 공통 평가 점수를 함께 보고 공격 신호가 큰 후보로 분류했습니다.',
+  },
+  defend: {
+    title: '탐색 방어',
+    detail: '알파베타 탐색 결과와 공통 평가 점수를 함께 보고 방어 신호가 큰 후보로 분류했습니다.',
+  },
+  'search-native': {
+    title: '네이티브 탐색 선택',
+    detail: 'C++ 탐색 엔진이 고른 수를 공통 평가 점수 기준으로 공격 신호가 큰 후보로 분류했습니다.',
+  },
+  'defend-native': {
+    title: '네이티브 탐색 방어',
+    detail: 'C++ 탐색 엔진이 고른 수를 공통 평가 점수 기준으로 방어 신호가 큰 후보로 분류했습니다.',
+  },
+  counter: {
+    title: '반격 후보',
+    detail: '탐색 후보가 부족해 공격과 방어 점수를 섞어 반격 자리를 골랐습니다.',
+  },
+  pressure: {
+    title: '압박 후보',
+    detail: '탐색 후보가 부족해 연결과 압박 점수가 높은 자리를 골랐습니다.',
+  },
+  easy: {
+    title: '쉬움 단순 선택',
+    detail: '쉬움 난이도라 깊은 탐색 없이 상위 후보 중 하나를 골랐습니다.',
+  },
+  'block-easy': {
+    title: '쉬움 방어 선택',
+    detail: '쉬움 난이도에서 상대 즉시 승리 수를 막기로 선택했습니다.',
+  },
+};
 
 function createBoardScene() {
   scene.add(new THREE.HemisphereLight(0xffffff, 0x9b8a70, 2.2));
@@ -842,7 +925,47 @@ function showResult(session) {
   resultPanel.classList.remove('hidden');
 }
 
+function stoneLabel(player) {
+  if (player === BLACK) return '검은돌';
+  if (player === WHITE) return '흰돌';
+  return '알 수 없음';
+}
+
+function logServerMoveDecisions(session) {
+  const newMoves = session.history.slice(sessionHistory.length).filter((move) => move.source === 'server');
+  if (!newMoves.length) return;
+
+  for (const move of newMoves) {
+    const reason = SERVER_REASON_TEXT[move.reason] ?? {
+      title: '기타 판단',
+      detail: '서버가 반환한 판단 코드를 그대로 기록합니다.',
+    };
+    const title = `[오목 AI] ${move.notation ?? moveNotation(move.row, move.col)} 착수 - ${reason.title}`;
+    console.groupCollapsed(title);
+    console.info('판단:', reason.detail);
+    if (move.explanation) console.info('세부 이유:', move.explanation);
+    if (move.decision) console.info('계산 근거:', move.decision);
+    console.info('위치:', {
+      notation: move.notation ?? moveNotation(move.row, move.col),
+      row: move.row,
+      col: move.col,
+      player: stoneLabel(move.player),
+    });
+    console.info('설정:', {
+      difficulty: session.options?.difficulty ?? state.options.difficulty,
+      forbiddenRule: session.options?.forbiddenRule ?? state.options.forbiddenRule,
+      tacticStyle: session.options?.tacticStyle ?? state.options.tacticStyle,
+      aiPlayer: stoneLabel(session.serverPlayer),
+      humanPlayer: stoneLabel(session.humanPlayer),
+    });
+    console.info('원본 reason:', move.reason);
+    console.groupEnd();
+  }
+}
+
 function updateUi(session) {
+  logServerMoveDecisions(session);
+
   state.board = session.board;
   state.currentPlayer = session.currentPlayer;
   state.humanPlayer = session.humanPlayer;
