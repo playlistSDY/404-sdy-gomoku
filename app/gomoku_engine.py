@@ -514,6 +514,17 @@ def is_forbidden_move(
     return threat["doubleThree"] or threat["doubleFour"]
 
 
+def forbidden_moves(board: list[list[int]], player: int, forbidden_rule: str | None = None) -> list[dict[str, int]]:
+    if normalize_forbidden_rule(forbidden_rule) != "renju" or player != BLACK:
+        return []
+    return [
+        {"row": row, "col": col}
+        for row in range(BOARD_SIZE)
+        for col in range(BOARD_SIZE)
+        if is_forbidden_move(board, row, col, player, forbidden_rule)
+    ]
+
+
 def legal_candidates(
     board: list[list[int]],
     player: int,

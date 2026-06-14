@@ -14,6 +14,7 @@ from app.gomoku_engine import (
     classify_line_pattern,
     choose_server_move,
     create_board,
+    forbidden_moves,
     get_difficulty_settings,
     get_winner,
     is_forbidden_move,
@@ -139,6 +140,11 @@ assert_true(normalize_forbidden_rule("none") == "none", "Forbidden rule off opti
 assert_true(normalize_tactic_style(None) == "defensive", "Missing tactic style did not normalize.")
 assert_true(normalize_tactic_style("aggressive") == "aggressive", "Aggressive tactic style did not normalize.")
 assert_true(is_forbidden_move(forbidden_board, 7, 7, BLACK, "renju"), "Double-three forbidden move failed.")
+forbidden_session_moves = forbidden_moves(forbidden_board, BLACK, "renju")
+assert_true(
+    {"row": 7, "col": 7} in forbidden_session_moves,
+    "Session forbidden move list did not include the black double-three.",
+)
 forbidden_ai_move = choose_server_move(forbidden_board, BLACK, forbidden_rule="renju")
 assert_true(
     forbidden_ai_move["row"] != 7 or forbidden_ai_move["col"] != 7,

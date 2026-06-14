@@ -220,8 +220,8 @@ if (
   started.debug?.currentPlayer !== 2 ||
   swappedOpening.openingSwapHidden !== true ||
   swappedOpening.debug?.historyLength !== 0 ||
-  swappedOpening.debug?.humanPlayer !== 2 ||
-  swappedOpening.debug?.currentPlayer !== 2 ||
+  swappedOpening.debug?.humanPlayer !== 1 ||
+  swappedOpening.debug?.currentPlayer !== 1 ||
   initial.selectedForbiddenRule !== 'none' ||
   initial.selectedHumanPlayer !== 'white' ||
   initial.selectedTacticStyle !== 'defensive' ||

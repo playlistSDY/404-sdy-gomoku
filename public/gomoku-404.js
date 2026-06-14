@@ -283,6 +283,7 @@ const state = {
   status: 'idle',
   thinking: false,
   options: readCachedOptions(),
+  forbiddenMoves: [],
   winLine: [],
   winner: null,
 };
@@ -295,7 +296,9 @@ const pointerGesture = {
   suppressClick: false,
 };
 
+const forbiddenMarkers = new Map();
 const stones = new Map();
+let forbiddenKeys = new Set();
 let sessionHistory = [];
 let statusTimer = null;
 let hoverMarker;
@@ -386,7 +389,15 @@ const materials = {
     opacity: 0.92,
     depthWrite: false,
   }),
+  forbidden: new THREE.MeshBasicMaterial({
+    color: 0xb94336,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+  }),
 };
+
+const forbiddenBarGeometry = new THREE.BoxGeometry(0.46, 0.026, 0.06);
 
 function createBoardScene() {
   scene.add(new THREE.HemisphereLight(0xffffff, 0x9b8a70, 2.2));
@@ -683,6 +694,41 @@ function removeStone(row, col) {
   stones.delete(key);
 }
 
+function createForbiddenMarker(row, col) {
+  const group = new THREE.Group();
+  const first = new THREE.Mesh(forbiddenBarGeometry, materials.forbidden);
+  const second = new THREE.Mesh(forbiddenBarGeometry, materials.forbidden);
+  first.rotation.y = Math.PI / 4;
+  second.rotation.y = -Math.PI / 4;
+  group.add(first, second);
+  group.position.set(gridToWorld(col), 0.145, gridToWorld(row));
+  group.userData = { row, col };
+  boardRoot.add(group);
+  forbiddenMarkers.set(keyFor(row, col), group);
+}
+
+function syncForbiddenMarkers(moves = []) {
+  const nextKeys = new Set(moves.map((move) => keyFor(move.row, move.col)));
+
+  for (const [key, marker] of forbiddenMarkers.entries()) {
+    if (nextKeys.has(key)) continue;
+    boardRoot.remove(marker);
+    forbiddenMarkers.delete(key);
+  }
+
+  for (const move of moves) {
+    const key = keyFor(move.row, move.col);
+    if (forbiddenMarkers.has(key)) continue;
+    createForbiddenMarker(move.row, move.col);
+  }
+
+  forbiddenKeys = nextKeys;
+}
+
+function isForbiddenCell(row, col) {
+  return forbiddenKeys.has(keyFor(row, col));
+}
+
 function syncStones(nextBoard, history) {
   for (const [key, group] of stones.entries()) {
     const [row, col] = key.split(',').map(Number);
@@ -745,7 +791,8 @@ function updateHoverMarker() {
     !state.thinking &&
     !state.inputLocked &&
     state.currentPlayer === state.humanPlayer &&
-    state.board[move.row][move.col] === EMPTY;
+    state.board[move.row][move.col] === EMPTY &&
+    !isForbiddenCell(move.row, move.col);
 
   hoverMarker.visible = Boolean(canShow);
   hoverMarker.material = state.humanPlayer === BLACK ? materials.hoverBlack : materials.hoverWhite;
@@ -804,12 +851,14 @@ function updateUi(session) {
   state.winner = session.winner;
   state.options = normalizeOptions({ ...state.options, ...(session.options ?? {}) });
   cacheOptions(state.options);
+  state.forbiddenMoves = session.forbiddenMoves ?? [];
   state.winLine = session.winLine ?? [];
   state.lastMove = session.history.at(-1) ?? null;
 
   updateHumanPlayerClass();
   updateSettingsControls();
   syncStones(session.board, session.history);
+  syncForbiddenMarkers(state.forbiddenMoves);
   updateHoverMarker();
   updateLastMoveMarker();
   updateWinLine();
@@ -835,9 +884,11 @@ function setRevealOrigin(x, y) {
 }
 
 function clearBoardScene() {
+  state.forbiddenMoves = [];
   sessionHistory = [];
   for (const group of stones.values()) boardRoot.remove(group);
   stones.clear();
+  syncForbiddenMarkers([]);
   if (winLineMesh) {
     boardRoot.remove(winLineMesh);
     winLineMesh = null;
@@ -905,7 +956,7 @@ async function swapOpeningSide() {
   clearBoardScene();
   setStatus('');
 
-  const session = await api('/api/new', optionsPayload({ humanPlayer: 'white', humanStarts: true }));
+  const session = await api('/api/new', optionsPayload({ humanPlayer: 'black' }));
   state.humanPlayer = session.humanPlayer;
   state.started = true;
   app.classList.add('is-starting', 'is-started');
@@ -929,9 +980,14 @@ async function playMove(row, col) {
     return;
   }
   if (state.board[row][col] !== EMPTY) return;
+  if (isForbiddenCell(row, col)) {
+    setStatus('금수 구역입니다.');
+    return;
+  }
 
   state.openingSwapAvailable = false;
   updateOpeningSwapPanel();
+  syncForbiddenMarkers([]);
 
   const previousBoard = state.board.map((line) => [...line]);
   const previousHistory = sessionHistory.map((move) => ({ ...move }));
@@ -979,7 +1035,7 @@ async function playMove(row, col) {
     app.classList.remove('is-thinking');
     updateLastMoveMarker();
     updateHoverMarker();
-    setStatus(error.message);
+    setStatus(error.message === '금수입니다.' ? '금수 구역입니다.' : error.message);
   }
 }
 
@@ -1094,6 +1150,8 @@ resize();
 window.__GOMOKU_404_DEBUG__ = {
   getState: () => ({
     currentPlayer: state.currentPlayer,
+    forbiddenMarkerCount: forbiddenMarkers.size,
+    forbiddenMoveCount: state.forbiddenMoves.length,
     historyLength: sessionHistory.length,
     humanPlayer: state.humanPlayer,
     openingSwapAvailable: state.openingSwapAvailable,

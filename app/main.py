@@ -17,6 +17,7 @@ from .gomoku_engine import (
     WHITE,
     choose_server_move,
     create_board,
+    forbidden_moves,
     get_winner,
     is_forbidden_move,
     normalize_difficulty,
@@ -126,10 +127,26 @@ def create_session(options: dict[str, Any] | None = None) -> dict[str, Any]:
     return session
 
 
+def forbidden_moves_for_session(session: dict[str, Any]) -> list[dict[str, int]]:
+    options = session.get("options", normalize_session_options())
+    board = session["board"]
+    human_player = session["humanPlayer"]
+    if (
+        session["status"] != "playing"
+        or session["currentPlayer"] != human_player
+        or normalize_forbidden_rule(options["forbiddenRule"]) != "renju"
+        or human_player != BLACK
+    ):
+        return []
+
+    return forbidden_moves(board, human_player, options["forbiddenRule"])
+
+
 def public_session(session: dict[str, Any]) -> dict[str, Any]:
     return {
         "board": session["board"],
         "currentPlayer": session["currentPlayer"],
+        "forbiddenMoves": forbidden_moves_for_session(session),
         "history": session["history"],
         "humanPlayer": session["humanPlayer"],
         "id": session["id"],
