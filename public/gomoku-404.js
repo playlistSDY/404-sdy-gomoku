@@ -4,6 +4,7 @@ const SIZE = 15;
 const EMPTY = 0;
 const BLACK = 1;
 const WHITE = 2;
+const DRAW = 3;
 const HALF = Math.floor(SIZE / 2);
 const GAP = 0.78;
 const BOARD_SPAN = GAP * (SIZE - 1);
@@ -307,6 +308,8 @@ let lastMoveMarker;
 let winLineMesh;
 let introProgress = 0;
 let optionRequestVersion = 0;
+let gameLogIndex = 0;
+let pendingSessionLogReason = 'new-game';
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xeee7da);
@@ -688,6 +691,7 @@ async function applyOption(name, value) {
     state.sideRestartPending = true;
     updateSettingsControls();
     setStatus('다음 재시작부터 적용됩니다.');
+    logOptionChange(name, value, 'pending');
     return;
   }
 
@@ -696,6 +700,7 @@ async function applyOption(name, value) {
   if (!state.started || !state.sessionId) return;
   if (state.status !== 'playing') {
     setStatus('옵션이 적용되었습니다.');
+    logOptionChange(name, value, 'applied');
     return;
   }
 
@@ -709,6 +714,7 @@ async function applyOption(name, value) {
     if (requestVersion !== optionRequestVersion) return;
     updateUi(session);
     setStatus('옵션이 적용되었습니다.');
+    logOptionChange(name, value, 'applied');
   } catch (error) {
     if (requestVersion !== optionRequestVersion) return;
     setStatus(error.message);
@@ -931,20 +937,116 @@ function stoneLabel(player) {
   return '알 수 없음';
 }
 
+function shortSessionId(id) {
+  return id ? String(id).slice(0, 8) : 'unknown';
+}
+
+function winnerLabel(session) {
+  if (session.winner === DRAW) return '무승부';
+  if (session.winner === session.humanPlayer) return '플레이어 승리';
+  if (session.winner === session.serverPlayer) return '컴퓨터 승리';
+  return '결과 없음';
+}
+
+function sessionLogContext(session, extra = {}) {
+  return {
+    game: gameLogIndex,
+    sessionId: shortSessionId(session.id),
+    moveCount: session.history?.length ?? 0,
+    status: session.status,
+    currentPlayer: stoneLabel(session.currentPlayer),
+    humanPlayer: stoneLabel(session.humanPlayer),
+    aiPlayer: stoneLabel(session.serverPlayer),
+    options: session.options ?? state.options,
+    ...extra,
+  };
+}
+
+function sessionReasonLabel(reason) {
+  if (reason === 'initial-start') return '첫 시작';
+  if (reason === 'restart-side-option') return '진영 설정 적용 재시작';
+  if (reason === 'restart') return '재시작';
+  if (reason === 'opening-swap') return '첫 수 진영 바꾸기';
+  return '새 게임';
+}
+
+function logGameFlag(flag, message, session, extra = {}) {
+  const style =
+    flag === 'START'
+      ? 'color:#0f766e;font-weight:700'
+      : flag === 'END'
+        ? 'color:#b91c1c;font-weight:700'
+        : flag === 'OPTION'
+          ? 'color:#7c3aed;font-weight:700'
+          : 'color:#2563eb;font-weight:700';
+  console.info(`%c[오목 ${flag}] ${message}`, style, sessionLogContext(session, extra));
+}
+
+function logSessionStart(session) {
+  if (state.sessionId === session.id) return;
+  gameLogIndex += 1;
+  logGameFlag('START', `${sessionReasonLabel(pendingSessionLogReason)} 시작`, session, {
+    startReason: pendingSessionLogReason,
+  });
+  pendingSessionLogReason = 'new-game';
+}
+
+function logSessionEnd(session, previousStatus) {
+  if (session.status !== 'finished' || previousStatus === 'finished') return;
+  logGameFlag('END', `${winnerLabel(session)}로 종료`, session, {
+    winner: winnerLabel(session),
+    winLine: session.winLine ?? [],
+    lastMove: session.history?.at(-1) ?? null,
+  });
+}
+
+function logOptionChange(name, value, mode) {
+  const label = mode === 'pending' ? '재시작 대기' : '적용';
+  console.info(`%c[오목 OPTION] ${name}=${value} ${label}`, 'color:#7c3aed;font-weight:700', {
+    game: gameLogIndex,
+    sessionId: shortSessionId(state.sessionId),
+    option: name,
+    value,
+    mode,
+    options: state.options,
+  });
+}
+
+function logHumanMove(move, moveNumber) {
+  console.info(`%c[오목 MOVE][#${moveNumber}] 플레이어 ${move.notation} 착수`, 'color:#2563eb;font-weight:700', {
+    game: gameLogIndex,
+    sessionId: shortSessionId(state.sessionId),
+    moveNumber,
+    player: stoneLabel(move.player),
+    row: move.row,
+    col: move.col,
+    notation: move.notation,
+  });
+}
+
 function logServerMoveDecisions(session) {
-  const newMoves = session.history.slice(sessionHistory.length).filter((move) => move.source === 'server');
+  const newMoves = session.history
+    .slice(sessionHistory.length)
+    .map((move, offset) => ({ move, moveNumber: sessionHistory.length + offset + 1 }))
+    .filter((entry) => entry.move.source === 'server');
   if (!newMoves.length) return;
 
-  for (const move of newMoves) {
+  for (const { move, moveNumber } of newMoves) {
     const reason = SERVER_REASON_TEXT[move.reason] ?? {
       title: '기타 판단',
       detail: '서버가 반환한 판단 코드를 그대로 기록합니다.',
     };
-    const title = `[오목 AI] ${move.notation ?? moveNotation(move.row, move.col)} 착수 - ${reason.title}`;
+    const title = `[오목 AI][#${moveNumber}] ${move.notation ?? moveNotation(move.row, move.col)} 착수 - ${reason.title}`;
     console.groupCollapsed(title);
     console.info('판단:', reason.detail);
     if (move.explanation) console.info('세부 이유:', move.explanation);
     if (move.decision) console.info('계산 근거:', move.decision);
+    console.info('게임:', {
+      game: gameLogIndex,
+      sessionId: shortSessionId(session.id),
+      moveNumber,
+      moveCount: session.history.length,
+    });
     console.info('위치:', {
       notation: move.notation ?? moveNotation(move.row, move.col),
       row: move.row,
@@ -964,6 +1066,8 @@ function logServerMoveDecisions(session) {
 }
 
 function updateUi(session) {
+  const previousStatus = state.status;
+  logSessionStart(session);
   logServerMoveDecisions(session);
 
   state.board = session.board;
@@ -988,6 +1092,7 @@ function updateUi(session) {
   showResult(session);
   updateOpeningSwapPanel();
   updateTurnStatus();
+  logSessionEnd(session, previousStatus);
 }
 
 async function api(path, payload = {}) {
@@ -1031,6 +1136,7 @@ async function startGame(event) {
   setRevealOrigin(originX, originY);
 
   app.classList.add('is-starting');
+  pendingSessionLogReason = 'initial-start';
   const session = await api('/api/new', optionsPayload({ humanPlayer: 'white' }));
   state.humanPlayer = session.humanPlayer;
   state.openingSwapAvailable = openingCenterIsServerBlack(session);
@@ -1051,6 +1157,7 @@ async function startGame(event) {
 
 async function restartMatch() {
   if (state.thinking) return;
+  const restartReason = state.sideRestartPending ? 'restart-side-option' : 'restart';
   state.inputLocked = true;
   state.openingSwapAvailable = false;
   state.sideRestartPending = false;
@@ -1058,6 +1165,7 @@ async function restartMatch() {
   closeSettingsPanel();
   setStatus('');
 
+  pendingSessionLogReason = restartReason;
   const session = await api('/api/new', optionsPayload());
   state.humanPlayer = session.humanPlayer;
   state.started = true;
@@ -1079,6 +1187,7 @@ async function swapOpeningSide() {
   clearBoardScene();
   setStatus('');
 
+  pendingSessionLogReason = 'opening-swap';
   const session = await api('/api/new', optionsPayload({ humanPlayer: 'black' }));
   state.humanPlayer = session.humanPlayer;
   state.started = true;
@@ -1122,6 +1231,7 @@ async function playMove(row, col) {
     source: 'human',
     notation: moveNotation(row, col),
   };
+  logHumanMove(localMove, sessionHistory.length + 1);
 
   state.board = state.board.map((line) => [...line]);
   state.board[row][col] = state.humanPlayer;

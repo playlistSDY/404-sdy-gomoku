@@ -72,12 +72,17 @@ def update_session_options(session: dict[str, Any], options: dict[str, Any]) -> 
 
 def make_server_move(session: dict[str, Any]) -> None:
     options = session.get("options", normalize_session_options())
+    replying_to_human_opening = (
+        len(session["history"]) == 1
+        and session["history"][0].get("source") == "human"
+    )
     server_move = choose_server_move(
         session["board"],
         session["serverPlayer"],
         difficulty=options["difficulty"],
         forbidden_rule=options["forbiddenRule"],
         tactic_style=options["tacticStyle"],
+        force_center_response=not replying_to_human_opening,
     )
     if not server_move:
         return

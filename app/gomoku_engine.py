@@ -266,13 +266,19 @@ def count_stones(board: list[list[int]]) -> int:
     return sum(1 for row in board for cell in row if cell != EMPTY)
 
 
-def opening_move(board: list[list[int]], candidates: list[dict]) -> dict | None:
+def opening_move(
+    board: list[list[int]],
+    candidates: list[dict],
+    force_center_response: bool = True,
+) -> dict | None:
     stones = count_stones(board)
     center_index = BOARD_SIZE // 2
-    if stones <= 1 and board[center_index][center_index] == EMPTY:
+    if stones == 0 and board[center_index][center_index] == EMPTY:
         return {"row": center_index, "col": center_index, "reason": "opening"}
-    if stones > 1:
+    if stones > 1 or not force_center_response:
         return None
+    if board[center_index][center_index] == EMPTY:
+        return {"row": center_index, "col": center_index, "reason": "opening"}
 
     ordered = sorted(
         candidates,
@@ -1733,6 +1739,7 @@ def choose_server_move(
     difficulty: str | None = None,
     forbidden_rule: str | None = None,
     tactic_style: str | None = None,
+    force_center_response: bool = True,
 ) -> dict | None:
     if not validate_board(board):
         raise ValueError("Invalid board.")
@@ -1750,7 +1757,7 @@ def choose_server_move(
     if not candidates:
         return None
 
-    opening = opening_move(board, candidates)
+    opening = opening_move(board, candidates, force_center_response)
     if opening:
         return finalize(opening)
 

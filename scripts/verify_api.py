@@ -63,6 +63,14 @@ assert_move(
     "AI did not take the center when the first stone was off-center.",
 )
 
+player_first_board = create_board()
+place_move(player_first_board, 6, 6, BLACK)
+player_first_response = choose_server_move(player_first_board, WHITE, force_center_response=False)
+assert_true(
+    player_first_response["reason"] != "opening",
+    "AI forced the center opening response after the player started first.",
+)
+
 place_move(board, 7, 7, BLACK)
 first_server_move = choose_server_move(board, WHITE)
 assert_true(first_server_move and isinstance(first_server_move["row"], int), "AI did not return a move.")
