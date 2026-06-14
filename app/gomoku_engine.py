@@ -1567,15 +1567,15 @@ def choose_easy_move(
     if not candidates:
         return None
 
-    if immediate_block and easy_roll(board, 41, 100) < 55:
+    if immediate_block:
         return {
             **immediate_block,
             "reason": "block-easy",
-            "explanation": "상대가 다음 수에 바로 이길 수 있는 자리라서, 쉬움 난이도 판정에서 이번에는 방어를 선택했습니다.",
+            "explanation": "상대가 다음 수에 바로 이길 수 있는 자리라서, 쉬움 난이도에서도 반드시 방어했습니다.",
             "decision": {
                 "mode": "easy",
-                "blockChancePercent": 55,
                 "target": "opponent-immediate-win",
+                "forced": True,
             },
         }
 

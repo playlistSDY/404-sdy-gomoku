@@ -90,6 +90,23 @@ assert_true(
     "Easy difficulty did not include common score details.",
 )
 
+easy_must_block_board = create_board()
+for col in range(11, 15):
+    place_move(easy_must_block_board, 14, col, BLACK)
+easy_must_block = choose_server_move(
+    easy_must_block_board,
+    WHITE,
+    difficulty="easy",
+    forbidden_rule="renju",
+    force_center_response=False,
+)
+assert_move(easy_must_block, 14, 10, "Easy difficulty did not block an immediate edge win.")
+assert_true(easy_must_block["reason"] == "block-easy", "Easy immediate block did not use block-easy reason.")
+assert_true(
+    easy_must_block.get("decision", {}).get("forced") is True,
+    "Easy immediate block was not marked as forced.",
+)
+
 reason_alignment_board = create_board()
 place_move(reason_alignment_board, 7, 5, BLACK)
 place_move(reason_alignment_board, 7, 6, BLACK)

@@ -481,7 +481,7 @@ const SERVER_REASON_TEXT = {
   },
   'block-easy': {
     title: '쉬움 방어 선택',
-    detail: '쉬움 난이도에서 상대 즉시 승리 수를 막기로 선택했습니다.',
+    detail: '쉬움 난이도에서도 상대 즉시 승리 수는 반드시 막습니다.',
   },
 };
 
