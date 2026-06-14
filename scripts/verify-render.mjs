@@ -51,8 +51,11 @@ async function sample(page) {
       lit,
       resultHidden: document.querySelector('#result-panel').classList.contains('hidden'),
       retryText: document.querySelector('#retry-button').textContent.trim(),
+      debug: window.__GOMOKU_404_DEBUG__?.getState?.() ?? null,
+      openingSwapHidden: document.querySelector('#opening-swap-panel').classList.contains('hidden'),
       selectedDifficulty: document.querySelector('[data-option="difficulty"].is-selected')?.dataset.value ?? '',
       selectedForbiddenRule: document.querySelector('[data-option="forbiddenRule"].is-selected')?.dataset.value ?? '',
+      selectedHumanPlayer: document.querySelector('[data-option="humanPlayer"].is-selected')?.dataset.value ?? '',
       selectedTacticStyle: document.querySelector('[data-option="tacticStyle"].is-selected')?.dataset.value ?? '',
       settingsButtonBackground: getComputedStyle(document.querySelector('#settings-button')).backgroundColor,
       settingsButtonBorderWidth: getComputedStyle(document.querySelector('#settings-button')).borderTopWidth,
@@ -61,6 +64,9 @@ async function sample(page) {
       settingsIconLoaded: document.querySelector('#settings-button img')?.naturalWidth > 0,
       settingsIconSrc: document.querySelector('#settings-button img')?.src ?? '',
       settingsPanelHidden: document.querySelector('#settings-panel').classList.contains('hidden'),
+      sideRestartHintHidden: document.querySelector('#side-restart-hint').classList.contains('hidden'),
+      sideRestartHintTag: document.querySelector('#side-restart-hint').tagName,
+      sideRestartHintText: document.querySelector('#side-restart-hint').textContent.trim(),
       status: document.querySelector('#micro-status').textContent,
       statusHidden: document.querySelector('#micro-status').classList.contains('hidden'),
     };
@@ -121,6 +127,20 @@ page.on('console', (message) => {
 });
 page.on('pageerror', (error) => errors.push(error.message));
 
+await page.addInitScript((key) => {
+  if (sessionStorage.getItem('gomoku-render-init')) return;
+  sessionStorage.setItem('gomoku-render-init', '1');
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      difficulty: 'expert',
+      forbiddenRule: 'none',
+      humanPlayer: 'white',
+      tacticStyle: 'defensive',
+    }),
+  );
+}, optionsStorageKey);
+
 await page.goto(url, { waitUntil: 'networkidle' });
 await page.waitForTimeout(500);
 const initial = await sample(page);
@@ -131,6 +151,11 @@ await page.waitForTimeout(1400);
 const started = await sample(page);
 await page.screenshot({ path: screenshotPath('started'), fullPage: false });
 
+await page.click('#opening-swap-button');
+await page.waitForTimeout(700);
+const swappedOpening = await sample(page);
+await page.screenshot({ path: screenshotPath('swapped-opening'), fullPage: false });
+
 await pinchZoom(page);
 await page.waitForTimeout(500);
 const pinched = await sample(page);
@@ -140,12 +165,14 @@ await page.click('#settings-button');
 await page.click('[data-option="difficulty"][data-value="hard"]');
 await page.click('[data-option="forbiddenRule"][data-value="renju"]');
 await page.click('[data-option="tacticStyle"][data-value="aggressive"]');
+await page.click('[data-option="humanPlayer"][data-value="black"]');
 await page.waitForTimeout(400);
 const optionsOpen = await sample(page);
 const cachedOptions = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}'), optionsStorageKey);
 await page.screenshot({ path: screenshotPath('options'), fullPage: false });
-await page.keyboard.press('Escape');
-await page.waitForTimeout(120);
+await page.click('#settings-restart-button');
+await page.waitForTimeout(800);
+const afterSettingsRestart = await sample(page);
 
 const center = {
   x: Math.round(page.viewportSize().width / 2),
@@ -165,6 +192,7 @@ await browser.close();
 
 const result = {
   afterClick,
+  afterSettingsRestart,
   cachedOptions,
   errors,
   initial,
@@ -174,6 +202,7 @@ const result = {
   reloaded,
   screenshots,
   started,
+  swappedOpening,
 };
 console.log(JSON.stringify(result, null, 2));
 
@@ -185,9 +214,19 @@ if (
   started.heroVisible > 0.2 ||
   started.retryText !== '다시하기' ||
   !started.resultHidden ||
+  started.openingSwapHidden ||
+  started.debug?.historyLength !== 1 ||
+  started.debug?.humanPlayer !== 2 ||
+  started.debug?.currentPlayer !== 2 ||
+  swappedOpening.openingSwapHidden !== true ||
+  swappedOpening.debug?.historyLength !== 0 ||
+  swappedOpening.debug?.humanPlayer !== 2 ||
+  swappedOpening.debug?.currentPlayer !== 2 ||
   initial.selectedForbiddenRule !== 'none' ||
+  initial.selectedHumanPlayer !== 'white' ||
   initial.selectedTacticStyle !== 'defensive' ||
   started.selectedForbiddenRule !== 'none' ||
+  started.selectedHumanPlayer !== 'white' ||
   started.selectedTacticStyle !== 'defensive' ||
   Number(initial.settingsButtonOpacity) > 0.1 ||
   Number(started.settingsButtonOpacity) < 0.8 ||
@@ -199,12 +238,24 @@ if (
   optionsOpen.settingsButtonTransform !== 'none' ||
   optionsOpen.selectedDifficulty !== 'hard' ||
   optionsOpen.selectedForbiddenRule !== 'renju' ||
+  optionsOpen.selectedHumanPlayer !== 'black' ||
   optionsOpen.selectedTacticStyle !== 'aggressive' ||
+  optionsOpen.sideRestartHintHidden ||
+  optionsOpen.sideRestartHintTag !== 'P' ||
+  optionsOpen.sideRestartHintText !== '재시작 시 적용됩니다.' ||
   cachedOptions.difficulty !== 'hard' ||
   cachedOptions.forbiddenRule !== 'renju' ||
+  cachedOptions.humanPlayer !== 'black' ||
   cachedOptions.tacticStyle !== 'aggressive' ||
+  afterSettingsRestart.debug?.humanPlayer !== 1 ||
+  afterSettingsRestart.debug?.currentPlayer !== 1 ||
+  afterSettingsRestart.debug?.historyLength !== 0 ||
+  !afterSettingsRestart.openingSwapHidden ||
+  !afterSettingsRestart.settingsPanelHidden ||
+  afterClick.debug?.historyLength < 2 ||
   reloaded.selectedDifficulty !== 'hard' ||
   reloaded.selectedForbiddenRule !== 'renju' ||
+  reloaded.selectedHumanPlayer !== 'black' ||
   reloaded.selectedTacticStyle !== 'aggressive' ||
   randomSession.options?.forbiddenRule !== 'none' ||
   randomSession.options?.tacticStyle !== 'defensive' ||

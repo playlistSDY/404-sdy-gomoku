@@ -107,7 +107,7 @@ def create_session(options: dict[str, Any] | None = None) -> dict[str, Any]:
     session = {
         "id": str(uuid4()),
         "board": create_board(),
-        "currentPlayer": BLACK,
+        "currentPlayer": human_player if options.get("humanStarts") is True else BLACK,
         "history": [],
         "humanPlayer": human_player,
         "options": session_options,

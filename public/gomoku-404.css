@@ -136,12 +136,14 @@ button {
 }
 
 .micro-status,
-.result-panel {
+.result-panel,
+.opening-swap-panel {
   position: fixed;
 }
 
 .micro-status,
-.result-panel {
+.result-panel,
+.opening-swap-panel {
   left: 50%;
   z-index: 6;
   transform: translateX(-50%);
@@ -171,6 +173,16 @@ button {
     transform 200ms ease;
 }
 
+.opening-swap-panel {
+  top: 34px;
+  display: grid;
+  justify-items: center;
+  transition:
+    opacity 200ms ease,
+    visibility 200ms ease,
+    transform 200ms ease;
+}
+
 .result-panel p {
   margin: 0;
   font-size: 15px;
@@ -178,7 +190,8 @@ button {
   letter-spacing: 0.12em;
 }
 
-.result-panel button {
+.result-panel button,
+.opening-swap-panel button {
   height: 36px;
   display: inline-flex;
   align-items: center;
@@ -192,7 +205,8 @@ button {
   letter-spacing: 0.04em;
 }
 
-.result-panel button:focus-visible {
+.result-panel button:focus-visible,
+.opening-swap-panel button:focus-visible {
   outline: 3px solid rgba(29, 111, 88, 0.28);
   outline-offset: 4px;
 }
@@ -236,7 +250,8 @@ button {
 }
 
 .settings-button:focus-visible,
-.settings-panel button:focus-visible {
+.settings-panel button:focus-visible,
+.settings-restart-button:focus-visible {
   outline: 3px solid rgba(29, 111, 88, 0.28);
   outline-offset: 4px;
 }
@@ -312,6 +327,50 @@ button {
   box-shadow: 0 6px 14px rgba(17, 20, 18, 0.16);
 }
 
+.option-restart-hint {
+  margin: 0;
+  color: rgba(29, 111, 88, 0.9);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.01em;
+}
+
+.option-restart-hint.hidden {
+  display: none;
+}
+
+.settings-action-row {
+  display: grid;
+}
+
+.settings-restart-button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(17, 20, 18, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.settings-restart-button {
+  background: #111412;
+  color: #f4f2eb;
+}
+
+.settings-restart-button .retry-icon {
+  border-color: rgba(244, 242, 235, 0.78);
+  border-right-color: transparent;
+}
+
+.settings-restart-button .retry-icon::after {
+  border-left-color: rgba(244, 242, 235, 0.78);
+}
+
 .retry-icon {
   width: 14px;
   height: 14px;
@@ -345,7 +404,8 @@ button {
   transform: translate(-50%, 8px);
 }
 
-.result-panel.hidden {
+.result-panel.hidden,
+.opening-swap-panel.hidden {
   transform: translate(-50%, -8px);
 }
 

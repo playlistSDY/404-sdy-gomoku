@@ -16,12 +16,14 @@ const START_INPUT_DELAY_MS = 710;
 const DEFAULT_OPTIONS = {
   difficulty: 'expert',
   forbiddenRule: 'none',
+  humanPlayer: 'white',
   tacticStyle: 'defensive',
 };
 const OPTIONS_STORAGE_KEY = 'gomoku-404-options';
 const OPTION_VALUES = {
   difficulty: new Set(['normal', 'hard', 'expert']),
   forbiddenRule: new Set(['none', 'renju']),
+  humanPlayer: new Set(['white', 'black', 'random']),
   tacticStyle: new Set(['defensive', 'aggressive']),
 };
 const moduleBaseUrl = new URL('.', import.meta.url);
@@ -222,7 +224,28 @@ app.innerHTML = `
         <button type="button" data-option="tacticStyle" data-value="aggressive">공격적</button>
       </div>
     </div>
+    <div class="settings-row">
+      <span class="settings-label">내 진영</span>
+      <div class="segmented-control" role="group" aria-label="내 진영">
+        <button type="button" data-option="humanPlayer" data-value="white">흰돌</button>
+        <button type="button" data-option="humanPlayer" data-value="black">검은돌</button>
+        <button type="button" data-option="humanPlayer" data-value="random">랜덤</button>
+      </div>
+      <p class="option-restart-hint hidden" id="side-restart-hint">재시작 시 적용됩니다.</p>
+    </div>
+    <div class="settings-action-row">
+      <button class="settings-restart-button" id="settings-restart-button" type="button">
+        <span class="retry-icon" aria-hidden="true"></span>
+        <span>재시작하기</span>
+      </button>
+    </div>
   </section>
+  <div class="opening-swap-panel hidden" id="opening-swap-panel">
+    <button id="opening-swap-button" type="button">
+      <span class="retry-icon" aria-hidden="true"></span>
+      <span>진영 바꾸기</span>
+    </button>
+  </div>
   <div class="result-panel hidden" id="result-panel">
     <p id="result-message">승리</p>
     <button id="retry-button" type="button">
@@ -238,6 +261,10 @@ const startOrb = document.querySelector('#start-orb');
 const microStatus = document.querySelector('#micro-status');
 const settingsButton = document.querySelector('#settings-button');
 const settingsPanel = document.querySelector('#settings-panel');
+const settingsRestartButton = document.querySelector('#settings-restart-button');
+const sideRestartHint = document.querySelector('#side-restart-hint');
+const openingSwapPanel = document.querySelector('#opening-swap-panel');
+const openingSwapButton = document.querySelector('#opening-swap-button');
 const resultPanel = document.querySelector('#result-panel');
 const resultMessage = document.querySelector('#result-message');
 const retryButton = document.querySelector('#retry-button');
@@ -249,7 +276,9 @@ const state = {
   humanPlayer: BLACK,
   inputLocked: true,
   lastMove: null,
+  openingSwapAvailable: false,
   sessionId: null,
+  sideRestartPending: false,
   started: false,
   status: 'idle',
   thinking: false,
@@ -473,6 +502,9 @@ function normalizeOptions(options = {}) {
     forbiddenRule: OPTION_VALUES.forbiddenRule.has(options.forbiddenRule)
       ? options.forbiddenRule
       : DEFAULT_OPTIONS.forbiddenRule,
+    humanPlayer: OPTION_VALUES.humanPlayer.has(options.humanPlayer)
+      ? options.humanPlayer
+      : DEFAULT_OPTIONS.humanPlayer,
     tacticStyle: OPTION_VALUES.tacticStyle.has(options.tacticStyle) ? options.tacticStyle : DEFAULT_OPTIONS.tacticStyle,
   };
 }
@@ -497,6 +529,7 @@ function optionsPayload(extra = {}) {
   return {
     difficulty: state.options.difficulty,
     forbiddenRule: state.options.forbiddenRule,
+    humanPlayer: state.options.humanPlayer,
     tacticStyle: state.options.tacticStyle,
     ...extra,
   };
@@ -508,6 +541,37 @@ function updateSettingsControls() {
     button.classList.toggle('is-selected', selected);
     button.setAttribute('aria-pressed', String(selected));
   }
+  sideRestartHint.classList.toggle('hidden', !state.sideRestartPending);
+}
+
+function updateHumanPlayerClass() {
+  app.classList.toggle('human-white', state.humanPlayer === WHITE);
+  app.classList.toggle('human-black', state.humanPlayer === BLACK);
+}
+
+function openingCenterIsServerBlack(session) {
+  if (!session || session.history?.length !== 1) return false;
+  const [move] = session.history;
+  return (
+    move.source === 'server' &&
+    move.player === BLACK &&
+    move.row === HALF &&
+    move.col === HALF &&
+    session.humanPlayer === WHITE
+  );
+}
+
+function updateOpeningSwapPanel() {
+  const canShow =
+    state.started &&
+    state.openingSwapAvailable &&
+    state.status === 'playing' &&
+    sessionHistory.length === 1 &&
+    sessionHistory[0]?.source === 'server' &&
+    sessionHistory[0]?.player === BLACK &&
+    state.board[HALF]?.[HALF] === BLACK;
+
+  openingSwapPanel.classList.toggle('hidden', !canShow);
 }
 
 function closeSettingsPanel() {
@@ -526,9 +590,20 @@ async function applyOption(name, value) {
   if (state.options[name] === value) return;
   state.options = normalizeOptions({ ...state.options, [name]: value });
   cacheOptions(state.options);
+  if (name === 'humanPlayer') {
+    state.sideRestartPending = true;
+    updateSettingsControls();
+    setStatus('다음 재시작부터 적용됩니다.');
+    return;
+  }
+
   updateSettingsControls();
 
   if (!state.started || !state.sessionId) return;
+  if (state.status !== 'playing') {
+    setStatus('옵션이 적용되었습니다.');
+    return;
+  }
 
   optionRequestVersion += 1;
   const requestVersion = optionRequestVersion;
@@ -539,7 +614,7 @@ async function applyOption(name, value) {
     });
     if (requestVersion !== optionRequestVersion) return;
     updateUi(session);
-    setStatus('옵션 적용됨');
+    setStatus('옵션이 적용되었습니다.');
   } catch (error) {
     if (requestVersion !== optionRequestVersion) return;
     setStatus(error.message);
@@ -732,12 +807,14 @@ function updateUi(session) {
   state.winLine = session.winLine ?? [];
   state.lastMove = session.history.at(-1) ?? null;
 
+  updateHumanPlayerClass();
   updateSettingsControls();
   syncStones(session.board, session.history);
   updateHoverMarker();
   updateLastMoveMarker();
   updateWinLine();
   showResult(session);
+  updateOpeningSwapPanel();
   updateTurnStatus();
 }
 
@@ -768,6 +845,7 @@ function clearBoardScene() {
   lastMoveMarker.visible = false;
   hoverMarker.visible = false;
   resultPanel.classList.add('hidden');
+  openingSwapPanel.classList.add('hidden');
 }
 
 async function startGame(event) {
@@ -779,10 +857,10 @@ async function startGame(event) {
   setRevealOrigin(originX, originY);
 
   app.classList.add('is-starting');
-  const session = await api('/api/new', { humanPlayer: 'white', ...optionsPayload() });
+  const session = await api('/api/new', optionsPayload({ humanPlayer: 'white' }));
   state.humanPlayer = session.humanPlayer;
-  app.classList.toggle('human-white', state.humanPlayer === WHITE);
-  app.classList.toggle('human-black', state.humanPlayer === BLACK);
+  state.openingSwapAvailable = openingCenterIsServerBlack(session);
+  updateHumanPlayerClass();
 
   await wait(START_REVEAL_DELAY_MS);
   state.started = true;
@@ -800,17 +878,42 @@ async function startGame(event) {
 async function restartMatch() {
   if (state.thinking) return;
   state.inputLocked = true;
+  state.openingSwapAvailable = false;
+  state.sideRestartPending = false;
   clearBoardScene();
+  closeSettingsPanel();
   setStatus('');
 
-  const session = await api('/api/new', { humanPlayer: 'white', ...optionsPayload() });
+  const session = await api('/api/new', optionsPayload());
   state.humanPlayer = session.humanPlayer;
   state.started = true;
-  app.classList.add('is-starting', 'is-started', 'human-white');
-  app.classList.remove('human-black', 'is-thinking');
+  app.classList.add('is-starting', 'is-started');
+  app.classList.remove('is-thinking');
+  updateHumanPlayerClass();
   updateUi(session);
 
   await wait(520);
+  state.inputLocked = false;
+  updateHoverMarker();
+  updateTurnStatus();
+}
+
+async function swapOpeningSide() {
+  if (state.thinking || !state.openingSwapAvailable) return;
+  state.inputLocked = true;
+  state.openingSwapAvailable = false;
+  clearBoardScene();
+  setStatus('');
+
+  const session = await api('/api/new', optionsPayload({ humanPlayer: 'white', humanStarts: true }));
+  state.humanPlayer = session.humanPlayer;
+  state.started = true;
+  app.classList.add('is-starting', 'is-started');
+  app.classList.remove('is-thinking');
+  updateHumanPlayerClass();
+  updateUi(session);
+
+  await wait(420);
   state.inputLocked = false;
   updateHoverMarker();
   updateTurnStatus();
@@ -827,10 +930,12 @@ async function playMove(row, col) {
   }
   if (state.board[row][col] !== EMPTY) return;
 
+  state.openingSwapAvailable = false;
+  updateOpeningSwapPanel();
+
   const previousBoard = state.board.map((line) => [...line]);
   const previousHistory = sessionHistory.map((move) => ({ ...move }));
   const previousLastMove = state.lastMove ? { ...state.lastMove } : null;
-  const hasServerMove = sessionHistory.some((move) => move.source === 'server');
   const localMove = {
     player: state.humanPlayer,
     row,
@@ -845,6 +950,7 @@ async function playMove(row, col) {
   state.lastMove = localMove;
   state.thinking = true;
   sessionHistory = [...sessionHistory, localMove];
+  const historyLengthBeforeResponse = sessionHistory.length;
 
   if (!stones.has(keyFor(row, col))) createStone(row, col, state.humanPlayer, true);
   updateLastMoveMarker();
@@ -856,7 +962,8 @@ async function playMove(row, col) {
     const startedAt = performance.now();
     const session = await api('/api/move', { sessionId: state.sessionId, row, col });
     const elapsed = performance.now() - startedAt;
-    if (hasServerMove && elapsed < COMPUTER_MOVE_MIN_MS) {
+    const serverMoveAdded = session.history.slice(historyLengthBeforeResponse).some((move) => move.source === 'server');
+    if (serverMoveAdded && elapsed < COMPUTER_MOVE_MIN_MS) {
       await wait(COMPUTER_MOVE_MIN_MS - elapsed);
     }
     state.thinking = false;
@@ -948,6 +1055,8 @@ canvas.addEventListener('click', (event) => {
 
 startOrb.addEventListener('click', startGame);
 retryButton.addEventListener('click', restartMatch);
+openingSwapButton.addEventListener('click', swapOpeningSide);
+settingsRestartButton.addEventListener('click', restartMatch);
 settingsButton.addEventListener('click', (event) => {
   event.stopPropagation();
   toggleSettingsPanel();
@@ -981,6 +1090,17 @@ window.addEventListener('resize', resize);
 createBoardScene();
 updateSettingsControls();
 resize();
+
+window.__GOMOKU_404_DEBUG__ = {
+  getState: () => ({
+    currentPlayer: state.currentPlayer,
+    historyLength: sessionHistory.length,
+    humanPlayer: state.humanPlayer,
+    openingSwapAvailable: state.openingSwapAvailable,
+    sideRestartPending: state.sideRestartPending,
+    status: state.status,
+  }),
+};
 
 const clock = new THREE.Clock();
 function animate() {
